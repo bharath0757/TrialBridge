@@ -245,6 +245,7 @@ export function LoginPage() {
               </Button>
             </form>
 
+            {import.meta.env.DEV && (
             {/* Quick Access Profiles */}
             <div className="mt-6 pt-5 border-t border-slate-100">
               <div className="flex items-center justify-between mb-3">
@@ -348,6 +349,8 @@ export function LoginPage() {
                 </button>
               </div>
             </div>
+
+            )}
 
           </>
         ) : (
