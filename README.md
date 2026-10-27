@@ -15,7 +15,7 @@ Use Node 22, Python 3.11, and MongoDB.
 3. In `reseacher/frontend`, run `npm ci` and `npm run dev`.
 4. Public registration creates participants. Run `python bootstrap_admin.py` in the backend directory to create the first administrator. It prompts for a password and never overwrites an existing account.
 
-Never run the legacy `seed.py` against a real database; it performs destructive demo seeding. Old demo credentials are no longer accepted.
+Never run the legacy `seed.py` against a real database; it performs destructive demo seeding. Public demo-login shortcuts are disabled in production. Existing database accounts using the old demo password must be secured before enabling public database access. Create a private owner administrator with `bootstrap_admin.py`, then inspect `python scripts/secure_demo_accounts.py --owner-email YOUR-EMAIL` from the repository root. Only use `--apply` after authorizing the credential change; the script refuses to modify demo accounts until a separate active owner with a private password exists. It preserves account data, locks the demo accounts, invalidates their known passwords, and records an audit event.
 
 ## Deploy
 
@@ -37,7 +37,7 @@ Cloud Run remains an alternative deployment through `scripts/deploy.ps1`. That s
 
 Run `npm test`, `npm run typecheck`, `npm run build` in the frontend and `python -m pytest -q` in the backend. GitHub Actions also runs Chromium sign-in/reload for all five roles, mobile participant registration, and malformed API response regressions against an isolated test database.
 
-Local verification passed 11 frontend regression tests and all 48 backend tests, including HTTP integration tests. The TypeScript production build passed. Browser verification passed sign-in, reload, and malformed-data recovery for all five roles, display of real participant appointments, mobile participant registration with an unassigned profile, and rejection of fake sessions when the API is unavailable. Access regressions cover participant and organization isolation, organization privilege escalation, private messages and tasks, and unknown clinical states. Live database persistence requires verification after backend provisioning.
+Local verification passed 11 frontend regression tests and all 50 backend tests, including HTTP integration tests. The TypeScript production build passed. Browser verification passed sign-in, reload, and malformed-data recovery for all five roles, display of real participant appointments, mobile participant registration with an unassigned profile, and rejection of fake sessions when the API is unavailable. Access regressions cover participant and organization isolation, organization privilege escalation, private messages and tasks, and unknown clinical states. Live database persistence requires verification after backend provisioning.
 
 Existing repository-wide lint debt remains (baseline: 206 errors and 13 warnings). Several dashboards, charts, simulations, and help/profile views still contain illustrative data or placeholder behavior. This is a prototype, not a claim that all features are validated for clinical production use.
 

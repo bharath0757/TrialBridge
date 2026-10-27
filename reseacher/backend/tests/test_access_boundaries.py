@@ -132,3 +132,39 @@ def test_new_signup_loads_its_own_unassigned_profile_without_validation_failure(
     assert profile['organization_id'] is None
     assert profile['enrollmentStatus'] == 'not_enrolled'
     assert profile['consentStatus'] == 'not_started'
+
+
+@pytest.fixture
+def demo_security_module():
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parents[3] / 'scripts' / 'secure_demo_accounts.py'
+    spec = importlib.util.spec_from_file_location('secure_demo_accounts', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_demo_accounts_cannot_be_changed_without_a_secure_owner(access_client, demo_security_module):
+    from app.core.security import hash_password
+    client, db, actors, ids = access_client
+    db.users.insert_one({'email': 'legacy@example.com', 'role': 'PLATFORM_ADMIN', 'hashed_password': hash_password('demo123')})
+    with pytest.raises(ValueError):
+        demo_security_module.secure_demo_accounts(db, 'missing.owner@example.com', apply=True)
+    with pytest.raises(ValueError):
+        demo_security_module.secure_demo_accounts(db, 'legacy@example.com', apply=True)
+    assert db.users.find_one({'email': 'legacy@example.com'}).get('is_locked') is None
+
+
+def test_demo_account_dry_run_and_apply_preserve_owner_and_private_accounts(access_client, demo_security_module):
+    from app.core.security import hash_password, verify_password
+    client, db, actors, ids = access_client
+    owner_id = db.users.insert_one({'email': 'owner@example.com', 'role': 'PLATFORM_ADMIN', 'is_active': True, 'hashed_password': hash_password('Private-owner-password-998!')}).inserted_id
+    legacy_id = db.users.insert_one({'email': 'legacy@example.com', 'role': 'PARTICIPANT', 'is_active': True, 'hashed_password': hash_password('demo123')}).inserted_id
+    assert demo_security_module.secure_demo_accounts(db, 'owner@example.com') == 1
+    assert verify_password('demo123', db.users.find_one({'_id': legacy_id})['hashed_password'])
+    assert demo_security_module.secure_demo_accounts(db, 'owner@example.com', apply=True) == 1
+    assert db.users.find_one({'_id': legacy_id})['is_locked'] is True
+    assert not verify_password('demo123', db.users.find_one({'_id': legacy_id})['hashed_password'])
+    assert verify_password('Private-owner-password-998!', db.users.find_one({'_id': owner_id})['hashed_password'])
+    assert db.audit_logs.count_documents({'action': 'LEGACY_DEMO_CREDENTIAL_RETIRED'}) == 1
