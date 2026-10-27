@@ -1,0 +1,54 @@
+name: Verify TrialBridge
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      JWT_SECRET: ci-only-signing-secret-never-use-in-production
+      MONGODB_URI: ''
+      CORS_ORIGINS: http://127.0.0.1:4173,http://localhost:4173
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: reseacher/frontend/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: npm ci
+        working-directory: reseacher/frontend
+      - run: npm test
+        working-directory: reseacher/frontend
+      - run: npm run build
+        working-directory: reseacher/frontend
+        env:
+          VITE_API_URL: http://127.0.0.1:8000/api
+      - run: pip install -r requirements-dev.txt
+        working-directory: reseacher/backend
+      - run: python -m pytest -q
+        working-directory: reseacher/backend
+      - run: python -m playwright install --with-deps chromium
+      - name: Run browser flows against isolated test database
+        shell: bash
+        run: |
+          python -m uvicorn e2e_server:app --host 127.0.0.1 --port 8000 --app-dir reseacher/backend/tests > /tmp/trialbridge-api.log 2>&1 &
+          npm --prefix reseacher/frontend run preview -- --host 127.0.0.1 --port 4173 > /tmp/trialbridge-web.log 2>&1 &
+          python reseacher/backend/tests/e2e_browser.py
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: verification-failure
+          path: |
+            /tmp/trialbridge-*.log
+            e2e-failure.png

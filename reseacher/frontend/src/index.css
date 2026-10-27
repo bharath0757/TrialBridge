@@ -1,0 +1,254 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --radius: 0.75rem;
+
+    /* Pure Light Theme (Primary White, Secondary Black) */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --primary: 0 0% 0%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 240 10% 3.9%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 40%;
+
+    --accent: 210 40% 96%;
+    --accent-foreground: 240 10% 3.9%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+
+    /* Chart colors */
+    --chart-1: 217 91% 60%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 262 83% 58%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 84% 60%;
+  }
+
+  /* Pure Dark Theme (Primary Black, Secondary White) */
+  .dark,
+  [data-theme="pure-dark"],
+  [data-theme="dark-glow"] {
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+
+    --card: 240 10% 4%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 240 10% 4%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 0 0% 100%;
+    --primary-foreground: 0 0% 0%;
+
+    --secondary: 240 5% 12%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 240 5% 12%;
+    --muted-foreground: 240 5% 75%;
+
+    --accent: 240 5% 12%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 40%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5% 18%;
+    --input: 240 5% 18%;
+    --ring: 217 91% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Plus Jakarta Sans', Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Smooth transitions for sidebar */
+.sidebar-transition {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Card hover effect */
+.card-hover {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+.card-hover:hover {
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.06);
+}
+
+/* =========================================================================
+   PURE DARK MODE ENHANCEMENTS (Primary Black, Secondary White)
+   ========================================================================= */
+.dark body,
+[data-theme="pure-dark"] body,
+[data-theme="dark-glow"] body {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+.dark .bg-white,
+[data-theme="pure-dark"] .bg-white,
+[data-theme="dark-glow"] .bg-white {
+  background-color: #0c0d10 !important;
+  border-color: #24262e !important;
+  color: #ffffff !important;
+}
+
+.dark .bg-slate-50,
+.dark .bg-slate-50\/50,
+.dark .bg-slate-50\/60,
+.dark .bg-slate-50\/70,
+.dark .bg-\[\#F8FAFC\],
+[data-theme="pure-dark"] .bg-slate-50,
+[data-theme="pure-dark"] .bg-\[\#F8FAFC\],
+[data-theme="dark-glow"] .bg-slate-50,
+[data-theme="dark-glow"] .bg-\[\#F8FAFC\] {
+  background-color: #000000 !important;
+}
+
+.dark .text-slate-900,
+.dark .text-slate-800,
+[data-theme="pure-dark"] .text-slate-900,
+[data-theme="pure-dark"] .text-slate-800,
+[data-theme="dark-glow"] .text-slate-900,
+[data-theme="dark-glow"] .text-slate-800 {
+  color: #ffffff !important;
+}
+
+.dark .text-slate-700,
+.dark .text-slate-600,
+[data-theme="pure-dark"] .text-slate-700,
+[data-theme="pure-dark"] .text-slate-600,
+[data-theme="dark-glow"] .text-slate-700,
+[data-theme="dark-glow"] .text-slate-600 {
+  color: #e2e8f0 !important;
+}
+
+.dark .text-slate-500,
+.dark .text-slate-400,
+[data-theme="pure-dark"] .text-slate-500,
+[data-theme="dark-glow"] .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+.dark .border-slate-200,
+.dark .border-slate-200\/60,
+.dark .border-slate-200\/80,
+.dark .border-slate-200\/90,
+.dark .border-slate-100,
+[data-theme="pure-dark"] .border-slate-200,
+[data-theme="dark-glow"] .border-slate-200 {
+  border-color: #24262e !important;
+}
+
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark select,
+.dark textarea,
+[data-theme="pure-dark"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="pure-dark"] textarea,
+[data-theme="dark-glow"] input:not([type="checkbox"]):not([type="radio"]),
+[data-theme="dark-glow"] textarea {
+  background-color: #14161d !important;
+  border-color: #2b2e38 !important;
+  color: #ffffff !important;
+}
+
+/* =========================================================================
+   GLOWING NAVIGATION BUTTONS (White Nav Glow & Dark Cyber Glow)
+   ========================================================================= */
+.nav-button-glow-active {
+  position: relative;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14) 0%, rgba(99, 102, 241, 0.16) 100%);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  box-shadow: 0 0 16px rgba(59, 130, 246, 0.35), 0 2px 8px rgba(59, 130, 246, 0.2);
+  color: #1d4ed8 !important;
+}
+
+.dark .nav-button-glow-active,
+[data-theme="dark-glow"] .nav-button-glow-active {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.22) 0%, rgba(147, 51, 234, 0.25) 100%);
+  border: 1px solid rgba(96, 165, 250, 0.55);
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.45), 0 0 35px rgba(147, 51, 234, 0.25);
+  color: #ffffff !important;
+}
+
+.nav-button-glow-pillar {
+  position: absolute;
+  left: 0;
+  top: 15%;
+  height: 70%;
+  width: 3.5px;
+  border-radius: 0 4px 4px 0;
+  background: linear-gradient(180deg, #60a5fa, #2563eb);
+  box-shadow: 0 0 10px #3b82f6, 0 0 18px #2563eb;
+}
+
+.nav-button-glow-hover:hover {
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.22);
+}
+
+/* =========================================================================
+   RE-ICONS: UPGRADED LUMINOUS GRADIENT MICRO-BADGES
+   ========================================================================= */
+.reicon-pod {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.625rem;
+  box-shadow: 0 2px 6px -1px rgba(0, 0, 0, 0.16);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  flex-shrink: 0;
+}
+
+.reicon-pod:hover {
+  transform: scale(1.12);
+}
+
+.reicon-active {
+  box-shadow: 0 0 12px currentColor, 0 2px 8px -1px rgba(0, 0, 0, 0.2);
+}
+

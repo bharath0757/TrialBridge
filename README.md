@@ -21,6 +21,10 @@ Never run the legacy `seed.py` against a real database; it performs destructive 
 
 Target: https://trialbridge-in-5443.web.app
 
+To publish the frontend while the backend is pending, run `./scripts/deploy-frontend.ps1`. This uses `firebase.frontend.json` and returns an explicit unavailable-service response for `/api/**`; sign-in and registration remain unavailable until the real API is connected.
+
+For a backend on Render or another HTTPS host, run `./scripts/deploy-frontend.ps1 -ApiUrl https://YOUR-BACKEND-HOST/api`. Set `CORS_ORIGINS` on that backend to include the Firebase Hosting origin. This rebuilds the frontend with the supplied API URL and uses notification polling.
+
 The Firebase project had no Cloud Run service at inspection. Before a full deployment:
 
 - Configure Google Cloud billing and the Cloud Run, Cloud Build, Artifact Registry, and Secret Manager APIs.
@@ -36,7 +40,7 @@ Never deploy `tests/e2e_server.py`. Production runs `app.main:app`.
 
 Run `npm test`, `npm run typecheck`, `npm run build` in the frontend and `python -m pytest -q` in the backend. GitHub Actions also runs Chromium sign-in/reload for all five roles, mobile participant registration, and malformed API response regressions against an isolated test database.
 
-Local verification passed 7 frontend regression tests and 11 backend unit tests. Windows local socket setup blocked HTTP integration tests; CI is configured to run these on Linux. Live database persistence and hosting require verification after provisioning.
+Local verification passed 8 frontend regression tests and all 26 backend tests, including HTTP integration tests. The TypeScript production build passed. Browser verification passed sign-in, reload, and malformed-data recovery for all five roles, mobile participant registration, and rejection of fake sessions when the API is unavailable. Live database persistence requires verification after backend provisioning.
 
 Existing repository-wide lint debt remains (baseline: 206 errors and 13 warnings). Several dashboards, charts, simulations, and help/profile views still contain illustrative data or placeholder behavior. This is a prototype, not a claim that all features are validated for clinical production use.
 
