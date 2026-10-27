@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.db.mongodb import get_db
 from app.core.security import get_current_user
-from app.core.permissions import require_role
+from app.core.permissions import require_role, clinical_record_scope, require_clinical_record_access, linked_participant_ids, require_study_access, require_participant_self_access
 from app.models.consent import ConsentResponse, ConsentCreate
 from app.services.workflow_service import submit_consent, verify_consent
 from app.repositories import consent as consent_repo
@@ -11,12 +11,7 @@ router = APIRouter()
 @router.get("/")
 def list_consents(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     from bson import ObjectId
-    if current_user["role"] == "PARTICIPANT":
-        p = db.participants.find_one({"user_id": current_user["id"]})
-        pid = str(p["_id"]) if p else current_user["id"]
-        consents = consent_repo.list_by_participant(db, pid)
-    else:
-        consents = consent_repo.list_all(db)
+    consents = list(db.consents.find(clinical_record_scope(current_user, db)))
 
     enriched = []
     for c in consents:
@@ -73,35 +68,32 @@ def list_consents(db = Depends(get_db), current_user: dict = Depends(get_current
 
 @router.get("/{id}")
 def get_consent(id: str, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    consent = consent_repo.get_by_id(db, id)
+    consent = require_clinical_record_access(current_user, db.consents, id, db)
     if not consent:
         raise HTTPException(status_code=404, detail="Consent not found")
     return consent
 
 @router.post("/request", response_model=ConsentResponse)
 def req_consent(c_in: ConsentCreate, db = Depends(get_db), current_user: dict = Depends(require_role("RESEARCH_COORDINATOR", "PRINCIPAL_INVESTIGATOR", "PLATFORM_ADMIN"))):
+    require_study_access(current_user, c_in.study_id, db)
+    require_participant_self_access(current_user, c_in.participant_id, db)
     return consent_repo.create(db, c_in.model_dump())
 
 @router.post("/{id}/submit")
 def do_submit_consent(id: str, db = Depends(get_db), current_user: dict = Depends(require_role("PARTICIPANT"))):
-    # we need participant_id which is linked to user. In reality, get participant_id from user.
-    participant_id = current_user["id"] # assuming user id == participant id for simplicity, or look it up
-    
-    # lookup real participant id
-    p = db.participants.find_one({"user_id": current_user["id"]})
-    pid = str(p["_id"]) if p else current_user["id"]
-    
-    submit_consent(db, id, pid)
+    consent = require_clinical_record_access(current_user, db.consents, id, db)
+    submit_consent(db, id, str(consent['participant_id']))
     return {"status": "success"}
 
 @router.post("/{id}/verify")
 def do_verify_consent(id: str, db = Depends(get_db), current_user: dict = Depends(require_role("RESEARCH_COORDINATOR"))):
+    require_clinical_record_access(current_user, db.consents, id, db)
     verify_consent(db, id, current_user["id"])
     return {"status": "success"}
 
 @router.post("/{id}/withdraw")
 def withdraw_consent(id: str, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    consent = consent_repo.get_by_id(db, id)
+    consent = require_clinical_record_access(current_user, db.consents, id, db)
     if not consent:
         raise HTTPException(status_code=404, detail="Consent not found")
     consent_repo.update_status(db, id, {"status": "WITHDRAWN"})

@@ -66,6 +66,27 @@ export function LoginPage() {
     }
   };
 
+  const handleQuickLogin = async (quickEmail: string, quickPassword: string = 'demo123') => {
+    setEmail(quickEmail);
+    setPassword(quickPassword);
+    setError('');
+    setIsLockedError(false);
+    setIsSubmitting(true);
+    try {
+      await login(quickEmail, quickPassword);
+      toast.success('Signed in successfully!');
+    } catch (err: any) {
+      const status = err?.response?.status;
+      let detail = apiErrorMessage(err);
+      if (status === 423 || status === 429 || detail.toLowerCase().includes('lock')) {
+        setIsLockedError(true);
+      }
+      setError(detail);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegError('');
@@ -223,6 +244,110 @@ export function LoginPage() {
                 {isSubmitting ? 'Authenticating...' : 'Sign In'}
               </Button>
             </form>
+
+            {/* Quick Access Profiles */}
+            <div className="mt-6 pt-5 border-t border-slate-100">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                  Quick Access Profiles
+                </span>
+                <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-medium">
+                  demo123
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('sarah.chen@trialbridge.io')}
+                  disabled={isSubmitting}
+                  className="flex items-center justify-between p-2 rounded-xl border border-slate-200/80 hover:border-blue-400 hover:bg-blue-50/50 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                      <LayoutDashboard className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-800 group-hover:text-blue-700">Platform Admin</p>
+                      <p className="text-[11px] text-slate-400 truncate">sarah.chen@trialbridge.io</p>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-medium text-blue-600 group-hover:translate-x-0.5 transition-transform">Sign in &rarr;</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('j.patel@cityhospital.org')}
+                  disabled={isSubmitting}
+                  className="flex items-center justify-between p-2 rounded-xl border border-slate-200/80 hover:border-purple-400 hover:bg-purple-50/50 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center shrink-0">
+                      <Stethoscope className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-800 group-hover:text-purple-700">Principal Investigator</p>
+                      <p className="text-[11px] text-slate-400 truncate">j.patel@cityhospital.org</p>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-medium text-purple-600 group-hover:translate-x-0.5 transition-transform">Sign in &rarr;</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('maya.r@trialbridge.io')}
+                  disabled={isSubmitting}
+                  className="flex items-center justify-between p-2 rounded-xl border border-slate-200/80 hover:border-emerald-400 hover:bg-emerald-50/50 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <Users className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-800 group-hover:text-emerald-700">Research Coordinator</p>
+                      <p className="text-[11px] text-slate-400 truncate">maya.r@trialbridge.io</p>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-medium text-emerald-600 group-hover:translate-x-0.5 transition-transform">Sign in &rarr;</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('m.torres@pharmaco.com')}
+                  disabled={isSubmitting}
+                  className="flex items-center justify-between p-2 rounded-xl border border-slate-200/80 hover:border-amber-400 hover:bg-amber-50/50 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0">
+                      <Building2 className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-800 group-hover:text-amber-700">Sponsor / Organization</p>
+                      <p className="text-[11px] text-slate-400 truncate">m.torres@pharmaco.com</p>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-medium text-amber-600 group-hover:translate-x-0.5 transition-transform">Sign in &rarr;</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogin('rahul.mehta@email.com')}
+                  disabled={isSubmitting}
+                  className="flex items-center justify-between p-2 rounded-xl border border-slate-200/80 hover:border-teal-400 hover:bg-teal-50/50 transition-all text-left group"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-7 h-7 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center shrink-0">
+                      <FlaskConical className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-slate-800 group-hover:text-teal-700">Participant</p>
+                      <p className="text-[11px] text-slate-400 truncate">rahul.mehta@email.com</p>
+                    </div>
+                  </div>
+                  <span className="text-[11px] font-medium text-teal-600 group-hover:translate-x-0.5 transition-transform">Sign in &rarr;</span>
+                </button>
+              </div>
+            </div>
 
           </>
         ) : (

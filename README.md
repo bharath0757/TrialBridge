@@ -19,28 +19,25 @@ Never run the legacy `seed.py` against a real database; it performs destructive 
 
 ## Deploy
 
-Target: https://trialbridge-in-5443.web.app
+Frontend: https://trialbridge-in-5443.web.app
 
-To publish the frontend while the backend is pending, run `./scripts/deploy-frontend.ps1`. This uses `firebase.frontend.json` and returns an explicit unavailable-service response for `/api/**`; sign-in and registration remain unavailable until the real API is connected.
+Render API: https://trialbridge-api-lrbt.onrender.com
 
-For a backend on Render or another HTTPS host, run `./scripts/deploy-frontend.ps1 -ApiUrl https://YOUR-BACKEND-HOST/api`. Set `CORS_ORIGINS` on that backend to include the Firebase Hosting origin. This rebuilds the frontend with the supplied API URL and uses notification polling.
+The Render service is `trialbridge-api` in Singapore, deployed from `main`. Its Dashboard is https://dashboard.render.com/web/srv-dbgb9hugekts738e3bl0. It uses the Free compute plan. Configure `MONGODB_URI` and a unique random `JWT_SECRET` of at least 32 characters in the service environment before enabling database-backed operations. Do not commit either value. `MONGODB_DATABASE` is `trialbridge`; `GEMINI_API_KEY` is optional.
 
-The Firebase project had no Cloud Run service at inspection. Before a full deployment:
+The current service is managed directly through Render service settings. Its build command is `cd reseacher/backend && pip install -r requirements.txt` and start command is `cd reseacher/backend && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT`. The existing `render.yaml` is an alternative Blueprint for creating a separate service, not an automatic sync for this service.
 
-- Configure Google Cloud billing and the Cloud Run, Cloud Build, Artifact Registry, and Secret Manager APIs.
-- Rotate the previously embedded database password and JWT signing secret. Store replacements in Secret Manager as `trialbridge-mongodb-uri` and `trialbridge-jwt-secret`. Give the runtime identity access only to those secrets and configure database network access.
-- Authenticate `gcloud` and `firebase` to project `trialbridge-in-5443`.
-- Run `./scripts/deploy.ps1` from the repository root. It deploys `trialbridge-api` in `us-central1`, checks database readiness, then builds and deploys Hosting. Failures stop the release.
+CORS allows the two Firebase origins. The tracked `reseacher/frontend/.env.production` contains only the public API URL. Explicit build environment variables override it in CI. Rebuild and publish Firebase with `./scripts/deploy-frontend.ps1`. The frontend uses direct HTTPS API requests and notification polling. A different backend can be supplied with `-ApiUrl https://YOUR-BACKEND-HOST/api`. Passing `-ApiUrl /api` publishes a disconnected frontend with an explicit unavailable-service response.
 
-The `/api/**` Cloud Run rewrite must precede the SPA fallback. `VITE_API_URL` may instead specify a separate backend's full `/api` URL. `VITE_WS_URL` is an optional direct WebSocket URL; without it hosted deployments use notification polling.
+Readiness is verified at `GET /api/health`, which must return HTTP 200 with `status: ok` and `database_status: connected`. Service startup alone is not proof of working database access. After configuring secrets, enable the Render HTTP health-check path `/api/health` and verify registration, login, session reload, and data persistence from the hosted frontend.
 
-Never deploy `tests/e2e_server.py`. Production runs `app.main:app`.
+Cloud Run remains an alternative deployment through `scripts/deploy.ps1`. That script requires Google Cloud billing, APIs, authentication, and Secret Manager values. Never deploy `tests/e2e_server.py`; production runs `app.main:app`.
 
 ## Verification and limits
 
 Run `npm test`, `npm run typecheck`, `npm run build` in the frontend and `python -m pytest -q` in the backend. GitHub Actions also runs Chromium sign-in/reload for all five roles, mobile participant registration, and malformed API response regressions against an isolated test database.
 
-Local verification passed 8 frontend regression tests and all 26 backend tests, including HTTP integration tests. The TypeScript production build passed. Browser verification passed sign-in, reload, and malformed-data recovery for all five roles, mobile participant registration, and rejection of fake sessions when the API is unavailable. Live database persistence requires verification after backend provisioning.
+Local verification passed 11 frontend regression tests and all 48 backend tests, including HTTP integration tests. The TypeScript production build passed. Browser verification passed sign-in, reload, and malformed-data recovery for all five roles, display of real participant appointments, mobile participant registration with an unassigned profile, and rejection of fake sessions when the API is unavailable. Access regressions cover participant and organization isolation, organization privilege escalation, private messages and tasks, and unknown clinical states. Live database persistence requires verification after backend provisioning.
 
 Existing repository-wide lint debt remains (baseline: 206 errors and 13 warnings). Several dashboards, charts, simulations, and help/profile views still contain illustrative data or placeholder behavior. This is a prototype, not a claim that all features are validated for clinical production use.
 

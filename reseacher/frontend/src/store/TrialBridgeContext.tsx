@@ -16,6 +16,13 @@ import { useAuth } from './AuthContext';
 import api from '@/lib/api';
 import { toast } from 'sonner';
 import { apiErrorMessage } from '@/lib/apiError';
+import { normalizeResource } from '@/lib/normalizeResource';
+
+async function fetchCollection(resource: string) {
+  const response = await api.get('/' + resource + '/');
+  if (!Array.isArray(response.data)) throw new Error('The API returned an invalid collection.');
+  return { data: response.data.map((row: unknown) => normalizeResource(resource, row)) };
+}
 
 interface TrialBridgeContextType {
   dataError: string;
@@ -57,9 +64,9 @@ export function TrialBridgeProvider({ children }: { children: ReactNode }) {
   // Fast single-resource study refresh
   const refreshStudies = useCallback(async () => {
     try {
-      const res = await api.get('/studies/');
+      const res = await fetchCollection('studies');
       if (Array.isArray(res.data)) {
-        setStudies(res.data);
+        setStudies(res.data as unknown as Study[]);
       }
     } catch (err) {
       console.warn('Fast study refresh warning:', err);
@@ -80,23 +87,23 @@ export function TrialBridgeProvider({ children }: { children: ReactNode }) {
         documentsRes,
         messagesRes
       ] = await Promise.all([
-        api.get('/studies/').catch(unavailable),
-        api.get('/participants/').catch(unavailable),
-        api.get('/visits/').catch(unavailable),
-        api.get('/tasks/').catch(unavailable),
-        api.get('/consent-records/').catch(unavailable),
-        api.get('/documents/').catch(unavailable),
-        api.get('/messages/').catch(unavailable)
+        fetchCollection('studies').catch(unavailable),
+        fetchCollection('participants').catch(unavailable),
+        fetchCollection('visits').catch(unavailable),
+        fetchCollection('tasks').catch(unavailable),
+        fetchCollection('consent-records').catch(unavailable),
+        fetchCollection('documents').catch(unavailable),
+        fetchCollection('messages').catch(unavailable)
       ]);
 
       setDataError(failed ? 'Some data could not be loaded. Please try again shortly.' : '');
-      if (Array.isArray(studiesRes.data)) setStudies(studiesRes.data);
-      if (Array.isArray(participantsRes.data)) setParticipants(participantsRes.data);
-      if (Array.isArray(visitsRes.data)) setVisits(visitsRes.data);
-      if (Array.isArray(tasksRes.data)) setTasks(tasksRes.data);
-      if (Array.isArray(consentRes.data)) setConsentRecords(consentRes.data);
-      if (Array.isArray(documentsRes.data)) setDocuments(documentsRes.data);
-      if (Array.isArray(messagesRes.data)) setMessages(messagesRes.data);
+      if (Array.isArray(studiesRes.data)) setStudies(studiesRes.data as unknown as Study[]);
+      if (Array.isArray(participantsRes.data)) setParticipants(participantsRes.data as unknown as Participant[]);
+      if (Array.isArray(visitsRes.data)) setVisits(visitsRes.data as unknown as Visit[]);
+      if (Array.isArray(tasksRes.data)) setTasks(tasksRes.data as unknown as Task[]);
+      if (Array.isArray(consentRes.data)) setConsentRecords(consentRes.data as unknown as ConsentRecord[]);
+      if (Array.isArray(documentsRes.data)) setDocuments(documentsRes.data as unknown as Document[]);
+      if (Array.isArray(messagesRes.data)) setMessages(messagesRes.data as unknown as Message[]);
     } catch (error) {
       console.error('Error fetching initial data', error);
     }
@@ -156,7 +163,7 @@ export function TrialBridgeProvider({ children }: { children: ReactNode }) {
 
   const approveScreening = useCallback(async (participantId: string, reviewerName: string, notes: string) => {
     try {
-      await api.post(`/participants/${participantId}/approve-screening`, { reviewerName, notes });
+      await api.post(`/participants/${participantId}/approve-screening`, { reviewer_name: reviewerName, notes });
       fetchInitialData();
     } catch (e) {
       toast.error(apiErrorMessage(e));
@@ -166,7 +173,7 @@ export function TrialBridgeProvider({ children }: { children: ReactNode }) {
 
   const rejectScreening = useCallback(async (participantId: string, reviewerName: string, notes: string) => {
     try {
-      await api.post(`/participants/${participantId}/reject-screening`, { reviewerName, notes });
+      await api.post(`/participants/${participantId}/reject-screening`, { reviewer_name: reviewerName, notes });
       fetchInitialData();
     } catch (e) {
       toast.error(apiErrorMessage(e));
@@ -196,8 +203,13 @@ export function TrialBridgeProvider({ children }: { children: ReactNode }) {
 
   const scheduleVisit = useCallback(async (visit: Visit) => {
     try {
-      const res = await api.post('/visits', visit);
-      setVisits((prev) => [...prev, res.data]);
+      const res = await api.post('/visits/', {
+        participant_id: visit.participantId, study_id: visit.studyId,
+        visit_name: visit.type, date: visit.date + 'T' + (visit.time || '00:00') + ':00',
+        status: visit.status.toUpperCase(),
+      });
+      const saved = normalizeResource('visits', res.data) as unknown as Visit;
+      setVisits((prev) => [...prev, saved]);
     } catch (e) {
       toast.error(apiErrorMessage(e));
       throw e;
@@ -206,7 +218,7 @@ export function TrialBridgeProvider({ children }: { children: ReactNode }) {
 
   const updateTaskStatus = useCallback(async (taskId: string, status: Task['status']) => {
     try {
-      await api.patch(`/tasks/${taskId}`, { status });
+      await api.put(`/tasks/${taskId}`, null, { params: { status } });
       setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
     } catch (e) {
       toast.error(apiErrorMessage(e));

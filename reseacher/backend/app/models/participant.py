@@ -13,7 +13,7 @@ class ClinicalAttributes(BaseModel):
 
 class ParticipantBase(BaseModel):
     participant_code: str
-    organization_id: str
+    organization_id: Optional[str] = None
     site_id: Optional[str] = None
     user_id: Optional[str] = None
     status: str = "ACTIVE"
@@ -42,9 +42,9 @@ class ParticipantResponse(ParticipantBase):
     study_id: Optional[str] = None
     studyName: Optional[str] = None
     study_name: Optional[str] = None
-    screeningStatus: Optional[str] = "approved"
-    consentStatus: Optional[str] = "consented"
-    enrollmentStatus: Optional[str] = "enrolled"
+    screeningStatus: Optional[str] = "candidate"
+    consentStatus: Optional[str] = "not_started"
+    enrollmentStatus: Optional[str] = "not_enrolled"
     lastActivity: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(populate_by_name=True, extra="allow")

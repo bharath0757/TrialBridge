@@ -2,12 +2,15 @@ from bson import ObjectId
 from typing import List, Optional
 
 def create(db, p_data: dict) -> dict:
+    from datetime import datetime
+    p_data.setdefault('created_at', datetime.utcnow())
     result = db.participants.insert_one(p_data)
     p_data["_id"] = str(result.inserted_id)
     return p_data
 
 def get_by_id(db, p_id: str) -> Optional[dict]:
-    p = db.participants.find_one({"_id": ObjectId(p_id)})
+    from app.core.permissions import find_record
+    p = find_record(db.participants, p_id)
     if p:
         p["_id"] = str(p["_id"])
     return p

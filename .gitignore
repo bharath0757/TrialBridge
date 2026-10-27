@@ -36,3 +36,8 @@ Thumbs.db
 *debug.log
 
 /e2e-failure.png
+
+!reseacher/frontend/.env.production
+
+# Local credential provisioning helper
+/scripts/set-db-password.ps1

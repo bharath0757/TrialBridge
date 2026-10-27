@@ -31,6 +31,10 @@ with sync_playwright() as p:
             page.reload()
             expect(page.locator('main')).to_be_visible()
             expect(page.get_by_text('Welcome to TrialBridge', exact=True)).not_to_be_visible()
+            if role == 'participant':
+                expect(page.get_by_text('Verified baseline appointment', exact=True)).to_be_visible()
+                expect(page.get_by_text('Verified Research Study', exact=True)).to_be_visible()
+                expect(page.get_by_text('Rahul Mehta', exact=True)).not_to_be_visible()
             # Reproduce the production HTML-vs-JSON fault after valid auth.
             page.route('**/api/studies/', lambda route: route.fulfill(status=200, content_type='text/html', body='<!doctype html><html>SPA</html>'))
             page.reload()
@@ -51,8 +55,11 @@ with sync_playwright() as p:
         page.get_by_role('button', name='Register as Participant').click()
         expect(page.get_by_text('Welcome to TrialBridge', exact=True)).not_to_be_visible()
         expect(page.locator('main')).to_be_visible()
+        expect(page.get_by_role('heading', name='Not yet enrolled', exact=True)).to_be_visible()
+        expect(page.get_by_text('Participant ID:', exact=False)).to_be_visible()
+        expect(page.get_by_text('Some data could not be loaded. Please try again shortly.')).not_to_be_visible()
         context.close()
-        print('PASS mobile participant registration and automatic sign-in')
+        print('PASS mobile participant registration, real unassigned profile, and automatic sign-in')
 
         context = browser.new_context()
         page = context.new_page()

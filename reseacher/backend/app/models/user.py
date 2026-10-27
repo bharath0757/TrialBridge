@@ -1,11 +1,11 @@
 from pydantic import AliasChoices, BaseModel, EmailStr, ConfigDict, Field
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 
 class UserBase(BaseModel):
     email: EmailStr
     name: str
-    role: str = "PARTICIPANT"
+    role: Literal["PLATFORM_ADMIN", "ORGANIZATION", "PRINCIPAL_INVESTIGATOR", "RESEARCH_COORDINATOR", "PARTICIPANT"] = "PARTICIPANT"
     organization_id: Optional[str] = None
     is_active: bool = True
     is_locked: Optional[bool] = False

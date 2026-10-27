@@ -9,11 +9,23 @@ from app.repositories import users as user_repo
 router = APIRouter()
 
 @router.get("/", response_model=List[UserResponse])
-def read_users(db = Depends(get_db), current_user: dict = Depends(require_role("PLATFORM_ADMIN"))):
-    return user_repo.list_all(db)
+def read_users(db = Depends(get_db), current_user: dict = Depends(require_role("PLATFORM_ADMIN", "ORGANIZATION"))):
+    records = user_repo.list_all(db)
+    if current_user['role'] == 'ORGANIZATION':
+        org_id = current_user.get('organization_id')
+        return [u for u in records if org_id and str(u.get('organization_id')) == str(org_id)]
+    return records
 
 @router.post("/", response_model=UserResponse)
 def create_user(user_in: UserCreate, db = Depends(get_db), current_user: dict = Depends(require_role("PLATFORM_ADMIN", "ORGANIZATION"))):
+    if current_user['role'] == 'ORGANIZATION':
+        org_id = current_user.get('organization_id')
+        if not org_id or user_in.role not in {'PRINCIPAL_INVESTIGATOR', 'RESEARCH_COORDINATOR', 'PARTICIPANT'}:
+            raise HTTPException(status_code=403, detail='Organizations can only create users within their research team.')
+        if user_in.organization_id and str(user_in.organization_id) != str(org_id):
+            raise HTTPException(status_code=403, detail='Cannot create users in another organization.')
+        user_in.organization_id = str(org_id)
+    user_in.email = str(user_in.email).strip().lower()
     if user_repo.get_by_email(db, user_in.email):
         raise HTTPException(status_code=400, detail="Email already registered")
     
@@ -26,6 +38,9 @@ def read_user(id: str, db = Depends(get_db), current_user: dict = Depends(get_cu
     user = user_repo.get_by_id(db, id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    same_org = current_user.get('organization_id') and str(current_user.get('organization_id')) == str(user.get('organization_id'))
+    if str(user['_id']) != str(current_user['id']) and current_user['role'] != 'PLATFORM_ADMIN' and not (current_user['role'] == 'ORGANIZATION' and same_org):
+        raise HTTPException(status_code=403, detail='Not authorized to access this user.')
     return user
 
 @router.put("/{id}")

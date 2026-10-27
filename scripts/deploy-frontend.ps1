@@ -1,6 +1,6 @@
 param(
     [string]$Project = 'trialbridge-in-5443',
-    [string]$ApiUrl = '/api'
+    [string]$ApiUrl = 'https://trialbridge-api-lrbt.onrender.com/api'
 )
 $ErrorActionPreference = 'Stop'
 if ($ApiUrl -ne '/api' -and $ApiUrl -notmatch '^https://[^/]+(/[^/]+)*/api/?$') {

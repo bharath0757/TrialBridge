@@ -57,3 +57,19 @@ test('frontend-only deployments explicitly reject the unavailable API response',
   respond({service_unavailable: true, detail: 'Backend deployment is pending.'});
   await assert.rejects(api.post('/auth/login'), /API is not connected/);
 });
+
+const { normalizeResource } = await loadTS('../src/lib/normalizeResource.ts');
+test('live visits and tasks map API fields to dashboard fields', () => {
+  const visit = normalizeResource('visits', {id:'v1',participant_id:'p1',study_id:'s1',visit_name:'Baseline',date:'2026-11-01T10:30:00',status:'SCHEDULED'});
+  assert.equal(visit.participantId, 'p1'); assert.equal(visit.type, 'Baseline'); assert.equal(visit.time, '10:30'); assert.equal(visit.location, 'Not specified');
+  const task = normalizeResource('tasks', {id:'t1',assignee_id:'u1',study_id:'s1',status:'TODO',due_date:'2026-11-01T00:00:00'});
+  assert.equal(task.status, 'pending'); assert.equal(task.dueDate, '2026-11-01');
+});
+test('private documents and messages retain ownership and content', () => {
+  assert.equal(normalizeResource('documents', {id:'d1',participant_id:'p1',title:'Consent'}).name, 'Consent');
+  const message = normalizeResource('messages', {id:'m1',from_id:'u1',to_id:'u2',content:'Research update',read:false});
+  assert.equal(message.body, 'Research update'); assert.equal(message.to, 'u2');
+});
+test('malformed collection records are rejected before reaching dashboard state', () => {
+  for (const value of [null, 'html', [], {}, {name:'missing identity'}]) assert.throws(() => normalizeResource('visits', value));
+});

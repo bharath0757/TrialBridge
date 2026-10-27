@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from app.db.mongodb import get_db
 from app.core.security import get_current_user
-from app.core.permissions import require_role, require_participant_self_access
+from app.core.permissions import require_role, require_participant_self_access, linked_participant_ids, find_record
 from app.core.connections import connection_manager
 from app.services.notification_service import create_notification
 from app.models.participant import ParticipantResponse, ParticipantCreate
@@ -27,6 +27,7 @@ class ScreeningApproveRequest(BaseModel):
 def _enrich_participant(db, p: dict) -> dict:
     from bson import ObjectId
     p["id"] = str(p.get("_id") or p.get("id"))
+    p["_id"] = p["id"]
     
     # User details
     u_id = p.get("user_id")
@@ -44,10 +45,10 @@ def _enrich_participant(db, p: dict) -> dict:
     
     # Clinical attributes
     clin = p.get("clinical_attributes") or {}
-    p["age"] = clin.get("age") or p.get("age", 45)
-    p["gender"] = clin.get("gender") or p.get("gender", "Male")
-    p["phone"] = p.get("phone", "+91 98765 43210")
-    p["location"] = p.get("location", "Main Site")
+    p["age"] = clin.get("age", p.get("age"))
+    p["gender"] = clin.get("gender") or p.get("gender")
+    p["phone"] = p.get("phone")
+    p["location"] = p.get("location")
     p["clinicalData"] = p.get("clinicalData") or clin.get("clinicalData") or (clin if "baselineHba1c" in clin or "doseMg" in clin else None)
 
     # Study connection
@@ -68,43 +69,33 @@ def _enrich_participant(db, p: dict) -> dict:
         if s_doc:
             study_name = s_doc.get("title") or s_doc.get("name", "Clinical Trial")
             
-    p["studyId"] = str(study_id) if study_id else "ST-001"
-    p["study_id"] = str(study_id) if study_id else "ST-001"
+    p["studyId"] = str(study_id) if study_id else None
+    p["study_id"] = str(study_id) if study_id else None
     p["studyName"] = study_name
     p["study_name"] = study_name
     
     # Statuses
-    p["enrollmentStatus"] = (sp.get("status") if sp else "enrolled").lower()
-    p["screeningStatus"] = "approved"
-    p["consentStatus"] = "consented"
-    p["lastActivity"] = "2026-09-10"
+    p["enrollmentStatus"] = str(sp.get("status", "not_enrolled") if sp else p.get("enrollmentStatus", "not_enrolled")).lower()
+    p["screeningStatus"] = p.get("screeningStatus") or p.get("screening_status") or "candidate"
+    consent = db.consents.find_one({"participant_id": p["id"], "study_id": str(study_id)}) if study_id else None
+    p["consentStatus"] = str(consent.get("status", "not_started") if consent else p.get("consentStatus", "not_started")).lower()
+    activity = p.get("lastActivity") or p.get("updated_at") or p.get("created_at")
+    p["lastActivity"] = activity.isoformat() if hasattr(activity, 'isoformat') else str(activity) if activity else None
     return p
 
 @router.get("/", response_model=List[ParticipantResponse])
 def read_participants(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
     from bson import ObjectId
     if current_user["role"] == "PARTICIPANT":
-        uid = current_user["id"]
-        try:
-            p = db.participants.find_one({"$or": [{"user_id": uid}, {"user_id": ObjectId(uid)}]})
-        except Exception:
-            p = db.participants.find_one({"user_id": uid})
-        if not p and current_user.get("email"):
-            u = db.users.find_one({"email": current_user["email"]})
-            if u:
-                u_str_id = str(u["_id"])
-                p = db.participants.find_one({"$or": [{"user_id": u_str_id}, {"user_id": u["_id"]}]})
-        if not p:
-            # Fallback to first participant in DB for participant user
-            p = db.participants.find_one()
-        if p:
-            p["_id"] = str(p["_id"])
-            return [_enrich_participant(db, p)]
-        return []
+        identifiers = linked_participant_ids(current_user, db)
+        return [_enrich_participant(db, find_record(db.participants, pid)) for pid in identifiers]
     elif current_user["role"] == "ORGANIZATION":
         ps = participant_repo.list_by_org(db, current_user.get("organization_id"))
-    else:
+    elif current_user['role'] == 'PLATFORM_ADMIN':
         ps = participant_repo.list_all(db)
+    else:
+        org_id = current_user.get('organization_id')
+        ps = participant_repo.list_by_org(db, org_id) if org_id else []
     return [_enrich_participant(db, p) for p in ps]
 
 @router.post("/", response_model=ParticipantResponse)
