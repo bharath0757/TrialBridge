@@ -245,15 +245,14 @@ export function LoginPage() {
               </Button>
             </form>
 
-            {/* Quick Access Profiles */}
-            {import.meta.env.DEV && (
+            {/* Demo Sign-In */}
             <div className="mt-6 pt-5 border-t border-slate-100">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Quick Access Profiles
+                  Demo Sign-In
                 </span>
                 <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-medium">
-                  demo123
+                  Password: demo123
                 </span>
               </div>
 
@@ -349,8 +348,6 @@ export function LoginPage() {
                 </button>
               </div>
             </div>
-
-            )}
 
           </>
         ) : (
