@@ -24,7 +24,55 @@ class ScreeningApproveRequest(BaseModel):
     reviewer_name: Optional[str] = None
     notes: Optional[str] = None
 
-def _enrich_participant(db, p: dict) -> dict:
+def _identifier_variants(values):
+    from bson import ObjectId
+    result = set()
+    for value in values:
+        if value is None:
+            continue
+        text = str(value)
+        result.add(text)
+        if ObjectId.is_valid(text):
+            result.add(ObjectId(text))
+    return list(result)
+
+
+def _enrich_participants(db, participants):
+    """Fetch related records once per collection instead of once per participant."""
+    if not participants:
+        return []
+    participant_ids = _identifier_variants(p.get('_id') or p.get('id') for p in participants)
+    user_ids = _identifier_variants(p.get('user_id') for p in participants)
+    emails = [p['email'] for p in participants if p.get('email')]
+    users = list(db.users.find({'$or': [{'_id': {'$in': user_ids}}, {'email': {'$in': emails}}]}))
+    memberships = list(db.study_participants.find({'participant_id': {'$in': participant_ids}}))
+    membership_map = {}
+    for membership in memberships:
+        membership_map.setdefault(str(membership.get('participant_id')), membership)
+    study_ids = _identifier_variants(
+        [m.get('study_id') for m in memberships] + [p.get('study_id') for p in participants]
+    )
+    studies = list(db.studies.find({'$or': [{'_id': {'$in': study_ids}}, {'id': {'$in': study_ids}}, {'study_code': {'$in': study_ids}}]}))
+    study_map = {}
+    for study in studies:
+        for key in ('_id', 'id', 'study_code'):
+            if study.get(key) is not None:
+                study_map[str(study[key])] = study
+    consents = list(db.consents.find({'participant_id': {'$in': participant_ids}}))
+    consent_map = {}
+    for consent in consents:
+        consent_map.setdefault((str(consent.get('participant_id')), str(consent.get('study_id'))), consent)
+    related = {
+        'users': {str(u['_id']): u for u in users},
+        'emails': {u.get('email'): u for u in users if u.get('email')},
+        'memberships': membership_map,
+        'studies': study_map,
+        'consents': consent_map,
+    }
+    return [_enrich_participant(db, p, related) for p in participants]
+
+
+def _enrich_participant(db, p: dict, related=None) -> dict:
     from bson import ObjectId
     p["id"] = str(p.get("_id") or p.get("id"))
     p["_id"] = p["id"]
@@ -32,14 +80,13 @@ def _enrich_participant(db, p: dict) -> dict:
     # User details
     u_id = p.get("user_id")
     u_doc = None
-    if u_id:
-        try:
-            u_doc = db.users.find_one({"_id": ObjectId(u_id)})
-        except Exception:
-            u_doc = db.users.find_one({"_id": u_id})
-    if not u_doc and p.get("email"):
-        u_doc = db.users.find_one({"email": p["email"]})
-        
+    if related is not None:
+        u_doc = related['users'].get(str(u_id)) or related['emails'].get(p.get('email'))
+    else:
+        u_doc = find_record(db.users, str(u_id)) if u_id else None
+        if not u_doc and p.get('email'):
+            u_doc = db.users.find_one({'email': p['email']})
+
     p["name"] = u_doc.get("name") if u_doc else p.get("name", f"Participant {p.get('participant_code', '')}")
     p["email"] = u_doc.get("email") if u_doc else p.get("email", "")
     
@@ -52,23 +99,16 @@ def _enrich_participant(db, p: dict) -> dict:
     p["clinicalData"] = p.get("clinicalData") or clin.get("clinicalData") or (clin if "baselineHba1c" in clin or "doseMg" in clin else None)
 
     # Study connection
-    sp = None
-    try:
-        p_oid = ObjectId(p["id"])
-        sp = db.study_participants.find_one({"participant_id": {"$in": [p["id"], str(p_oid)]}})
-    except Exception:
-        sp = db.study_participants.find_one({"participant_id": p["id"]})
-        
-    study_id = sp.get("study_id") if sp else p.get("study_id")
-    study_name = "Clinical Trial"
+    sp = (related['memberships'].get(p['id']) if related is not None else
+          db.study_participants.find_one({'participant_id': {'$in': _identifier_variants([p['id']])}}))
+    study_id = sp.get('study_id') if sp else p.get('study_id')
+    study_name = 'Clinical Trial'
     if study_id:
-        try:
-            s_doc = db.studies.find_one({"_id": ObjectId(study_id)})
-        except Exception:
-            s_doc = db.studies.find_one({"_id": study_id})
+        s_doc = (related['studies'].get(str(study_id)) if related is not None else
+                 find_record(db.studies, str(study_id)))
         if s_doc:
-            study_name = s_doc.get("title") or s_doc.get("name", "Clinical Trial")
-            
+            study_name = s_doc.get('title') or s_doc.get('name', 'Clinical Trial')
+
     p["studyId"] = str(study_id) if study_id else None
     p["study_id"] = str(study_id) if study_id else None
     p["studyName"] = study_name
@@ -77,7 +117,8 @@ def _enrich_participant(db, p: dict) -> dict:
     # Statuses
     p["enrollmentStatus"] = str(sp.get("status", "not_enrolled") if sp else p.get("enrollmentStatus", "not_enrolled")).lower()
     p["screeningStatus"] = p.get("screeningStatus") or p.get("screening_status") or "candidate"
-    consent = db.consents.find_one({"participant_id": p["id"], "study_id": str(study_id)}) if study_id else None
+    consent = (related['consents'].get((p['id'], str(study_id))) if related is not None else
+               db.consents.find_one({'participant_id': p['id'], 'study_id': str(study_id)})) if study_id else None
     p["consentStatus"] = str(consent.get("status", "not_started") if consent else p.get("consentStatus", "not_started")).lower()
     activity = p.get("lastActivity") or p.get("updated_at") or p.get("created_at")
     p["lastActivity"] = activity.isoformat() if hasattr(activity, 'isoformat') else str(activity) if activity else None
@@ -88,7 +129,7 @@ def read_participants(db = Depends(get_db), current_user: dict = Depends(get_cur
     from bson import ObjectId
     if current_user["role"] == "PARTICIPANT":
         identifiers = linked_participant_ids(current_user, db)
-        return [_enrich_participant(db, find_record(db.participants, pid)) for pid in identifiers]
+        return _enrich_participants(db, [find_record(db.participants, pid) for pid in identifiers])
     elif current_user["role"] == "ORGANIZATION":
         ps = participant_repo.list_by_org(db, current_user.get("organization_id"))
     elif current_user['role'] == 'PLATFORM_ADMIN':
@@ -96,7 +137,7 @@ def read_participants(db = Depends(get_db), current_user: dict = Depends(get_cur
     else:
         org_id = current_user.get('organization_id')
         ps = participant_repo.list_by_org(db, org_id) if org_id else []
-    return [_enrich_participant(db, p) for p in ps]
+    return _enrich_participants(db, ps)
 
 @router.post("/", response_model=ParticipantResponse)
 def create_participant(p_in: ParticipantCreate, db = Depends(get_db), current_user: dict = Depends(require_role("PLATFORM_ADMIN", "ORGANIZATION", "RESEARCH_COORDINATOR"))):
@@ -431,4 +472,3 @@ def record_trial_decision(
             "message": "Trial invitation declined.",
             "participant_id": id
         }
-
