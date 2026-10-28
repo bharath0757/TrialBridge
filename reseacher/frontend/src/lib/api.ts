@@ -14,7 +14,8 @@ const getBaseURL = () => {
 const api = axios.create({
   baseURL: getBaseURL(),
   headers: { 'Content-Type': 'application/json' },
-  timeout: 10000,
+  // Allow a free Render instance to wake up before reporting an outage.
+  timeout: 60000,
 });
 
 // JWT interceptor
@@ -24,7 +25,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// 401 interceptor — redirect to login ONLY on genuine session expiry, not auth checks or demo accounts
+// 401 interceptor - redirect to login ONLY on genuine session expiry, not auth checks or demo accounts
 api.interceptors.response.use(
   (response) => {
     if (response.data?.service_unavailable === true) {
