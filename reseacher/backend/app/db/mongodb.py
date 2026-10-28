@@ -15,6 +15,23 @@ class MongoDB:
 
 db_instance = MongoDB()
 
+def connection_failure_category(exc):
+    """Return fixed diagnostic labels without exposing connection-string details."""
+    message = str(exc).lower()
+    if getattr(exc, 'code', None) == 18 or 'authentication failed' in message:
+        return 'authentication'
+    if 'certificate_verify_failed' in message or 'certificate verify failed' in message:
+        return 'tls_certificate'
+    if 'ssl handshake' in message or 'tls' in message:
+        return 'tls_handshake_or_network_access'
+    if 'dns' in message or 'resolution' in message or 'nxdomain' in message:
+        return 'dns_resolution'
+    if 'timed out' in message or 'timeout' in message:
+        return 'network_timeout'
+    if 'connection refused' in message:
+        return 'connection_refused'
+    return 'connection_configuration'
+
 def startup_connect():
     if db_instance.is_connected:
         return
@@ -26,19 +43,19 @@ def startup_connect():
         return
     client = None
     try:
-        client = MongoClient(settings.MONGODB_URI, serverSelectionTimeoutMS=3000,
-                             connectTimeoutMS=3000, socketTimeoutMS=5000,
+        client = MongoClient(settings.MONGODB_URI, serverSelectionTimeoutMS=10000,
+                             connectTimeoutMS=10000, socketTimeoutMS=5000,
                              maxPoolSize=30, minPoolSize=0, appname='TrialBridge')
         client.admin.command('ping')
         db_instance.client = client
         db_instance.db = client[settings.MONGODB_DATABASE]
         db_instance.is_connected = True
         db_instance.connection_error = None
-    except Exception:
+    except Exception as exc:
         if client is not None:
             client.close()
         db_instance.connection_error = 'Database connection unavailable.'
-        logger.warning('MongoDB connection failed. Check server credentials and network access.')
+        logger.warning('MongoDB connection failed: %s. Check server credentials and network access.', connection_failure_category(exc))
 
 def shutdown_disconnect():
     if db_instance.client is not None:

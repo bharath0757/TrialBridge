@@ -15,7 +15,7 @@ Use Node 22, Python 3.11, and MongoDB.
 3. In `reseacher/frontend`, run `npm ci` and `npm run dev`.
 4. Public registration creates participants. Run `python bootstrap_admin.py` in the backend directory to create the first administrator. It prompts for a password and never overwrites an existing account.
 
-Never run the legacy `seed.py` against a real database; it performs destructive demo seeding. Public demo-login shortcuts are disabled in production. Existing database accounts using the old demo password must be secured before enabling public database access. Create a private owner administrator with `bootstrap_admin.py`, then inspect `python scripts/secure_demo_accounts.py --owner-email YOUR-EMAIL` from the repository root. Only use `--apply` after authorizing the credential change; the script refuses to modify demo accounts until a separate active owner with a private password exists. It preserves account data, locks the demo accounts, invalidates their known passwords, and records an audit event.
+Never run the legacy `seed.py` against a real database; it performs destructive demo seeding. Public demo-login shortcuts are disabled in production. The owner has explicitly chosen to keep the existing demo-account passwords active for this public demonstration. Do not run the retirement script or reset those accounts without a new instruction. Before a future production launch, secure the demo accounts. Create a private owner administrator with `bootstrap_admin.py`, then inspect `python scripts/secure_demo_accounts.py --owner-email YOUR-EMAIL` from the repository root. Only use `--apply` after authorizing the credential change; the script refuses to modify demo accounts until a separate active owner with a private password exists. It preserves account data, locks the demo accounts, invalidates their known passwords, and records an audit event.
 
 ## Deploy
 
@@ -23,7 +23,7 @@ Frontend: https://trialbridge-in-5443.web.app
 
 Render API: https://trialbridge-api-lrbt.onrender.com
 
-The Render service is `trialbridge-api` in Singapore, deployed from `main`. Its Dashboard is https://dashboard.render.com/web/srv-dbgb9hugekts738e3bl0. It uses the Free compute plan. Configure `MONGODB_URI` and a unique random `JWT_SECRET` of at least 32 characters in the service environment before enabling database-backed operations. Do not commit either value. `MONGODB_DATABASE` is `trialbridge`; `GEMINI_API_KEY` is optional.
+The Render service is `trialbridge-api` in Singapore, deployed from `main`. Its Dashboard is https://dashboard.render.com/web/srv-dbgb9hugekts738e3bl0. It uses the Free compute plan. `MONGODB_URI` and a fresh random `JWT_SECRET` are configured in Render. Database-backed operations still require successful connectivity from Render to MongoDB Atlas. Do not commit either value. `MONGODB_DATABASE` is `trialbridge`; `GEMINI_API_KEY` is optional.
 
 The current service is managed directly through Render service settings. Its build command is `cd reseacher/backend && pip install -r requirements.txt` and start command is `cd reseacher/backend && exec uvicorn app.main:app --host 0.0.0.0 --port $PORT`. The existing `render.yaml` is an alternative Blueprint for creating a separate service, not an automatic sync for this service.
 
