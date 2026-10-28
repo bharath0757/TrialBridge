@@ -168,3 +168,26 @@ def test_demo_account_dry_run_and_apply_preserve_owner_and_private_accounts(acce
     assert not verify_password('demo123', db.users.find_one({'_id': legacy_id})['hashed_password'])
     assert verify_password('Private-owner-password-998!', db.users.find_one({'_id': owner_id})['hashed_password'])
     assert db.audit_logs.count_documents({'action': 'LEGACY_DEMO_CREDENTIAL_RETIRED'}) == 1
+
+
+def test_participant_list_batches_related_queries(access_client):
+    from unittest.mock import MagicMock
+    from app.routes.participants import _enrich_participants
+    _, db, actors, ids = access_client
+    rows = []
+    for index in range(60):
+        pid = ObjectId()
+        rows.append({'_id': pid, 'user_id': actors['participant_a']['id'], 'participant_code': f'BATCH-{index}'})
+        db.study_participants.insert_one({'participant_id': str(pid), 'study_id': ids['study_a'], 'status': 'ENROLLED'})
+        db.consents.insert_one({'participant_id': str(pid), 'study_id': ids['study_a'], 'status': 'SIGNED'})
+    counted_db = MagicMock()
+    for name in ('users', 'study_participants', 'studies', 'consents'):
+        getattr(counted_db, name).find.side_effect = db[name].find
+    profiles = _enrich_participants(counted_db, rows)
+    assert len(profiles) == 60
+    assert all(p['name'] == 'participant_a' and p['studyName'] == 'Study a' for p in profiles)
+    assert all(p['consentStatus'] == 'signed' and p['enrollmentStatus'] == 'enrolled' for p in profiles)
+    for name in ('users', 'study_participants', 'studies', 'consents'):
+        collection = getattr(counted_db, name)
+        assert collection.find.call_count == 1
+        collection.find_one.assert_not_called()
