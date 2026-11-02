@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AnatomySpace3D,
   type AnatomicalSystem,
@@ -119,8 +119,8 @@ const REFERENCE_BENCHMARKS: BenchmarkPreset[] = [
 ];
 
 export function SimulationLabPage() {
-  const { role } = useAuth();
-  const { participants } = useTrialBridge();
+  const { role, user } = useAuth();
+  const { participants, studies } = useTrialBridge();
   const pkMetrics = computePharmacokineticsMetrics(participants);
   const efficacyMetrics = computeClinicalEfficacyMetrics(participants);
 
@@ -147,12 +147,24 @@ export function SimulationLabPage() {
   // ADMET Review Workflow State (Routed to PI, terminates at PI)
   const [admetReviewStatus, setAdmetReviewStatus] = useState<'IDLE' | 'PENDING_PI_REVIEW' | 'REVIEWED'>('IDLE');
   const [admetReviewDecision, setAdmetReviewDecision] = useState<'APPROVED' | 'REJECTED'>('APPROVED');
-  const [admetReviewNotes, setAdmetReviewNotes] = useState<string>(
-    'Renal clearance profiles (OCT2/MATE1) and predicted AUC ratios verified safe. Target organ exposure within protocol parameters. Protocol approved.'
-  );
-  const [coordinatorNotes, setCoordinatorNotes] = useState<string>(
-    'eGFR >= 45 mL/min verified. In-silico clearance profile exceeds protocol safety threshold.'
-  );
+  const [admetReviewNotes, setAdmetReviewNotes] = useState('');
+  const [coordinatorNotes, setCoordinatorNotes] = useState('');
+  const [studyId, setStudyId] = useState('');
+  const [savingReview, setSavingReview] = useState(false);
+  const [pendingReviews, setPendingReviews] = useState<Array<{
+    analysis_id: string; compound_name: string; study_id: string; coordinator_notes: string;
+    dose_context: { dose_amount: number; unit: string }; verdict: string;
+  }>>([]);
+  const [reviewId, setReviewId] = useState('');
+  const selectedReview = pendingReviews.find(record => record.analysis_id === reviewId);
+  useEffect(() => {
+    if (role !== 'PRINCIPAL_INVESTIGATOR') return;
+    const controller = new AbortController();
+    api.get('/admet/history', { params: { review_status: 'PENDING_PI_REVIEW' }, signal: controller.signal })
+      .then(({ data }) => setPendingReviews(data))
+      .catch(() => { if (!controller.signal.aborted) toast.error('Could not load assigned reviews'); });
+    return () => controller.abort();
+  }, [role, user?.id]);
   const [showCoordinatorModal, setShowCoordinatorModal] = useState<boolean>(false);
   const [reviewTimestamp, setReviewTimestamp] = useState<string>('');
 
@@ -168,42 +180,40 @@ export function SimulationLabPage() {
   } | null>(null);
 
   const handleSubmitToPi = async () => {
+    if (!studyId || savingReview) return;
+    setSavingReview(true);
     try {
-      await api.post('/admet/request-review', {
-        analysis_id: `AN-${(activeProfile.formula || 'CMP').replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}-001`,
-        study_id: 'DB-101',
-        coordinator_name: 'Maya R',
-        notes: coordinatorNotes,
+      const { data } = await api.post('/admet/analyze', {
+        compound_id: selectedPresetId || 'custom', smiles: inputSmiles,
+        dose_input: { dose_amount: dosage }, analysis_mode: 'compound_only',
       });
+      await api.post('/admet/request-review', { analysis_id: data.analysis_id, study_id: studyId, notes: coordinatorNotes });
       setAdmetReviewStatus('PENDING_PI_REVIEW');
       setShowCoordinatorModal(false);
-      toast.success('Simulation submitted to Principal Investigator for clinical sign-off');
+      toast.success('Submitted to the study investigator');
     } catch {
-      setAdmetReviewStatus('PENDING_PI_REVIEW');
-      setShowCoordinatorModal(false);
-      toast.success('Simulation submitted to Principal Investigator');
+      toast.error('Could not submit the review. Check the selected study and try again.');
+    } finally {
+      setSavingReview(false);
     }
   };
 
   const handlePiSignOff = async () => {
-    const ts = new Date().toISOString();
+    if (!selectedReview || savingReview) return;
+    setSavingReview(true);
     try {
-      await api.post('/admet/review', {
-        analysis_id: `AN-${(activeProfile.formula || 'CMP').replace(/[^a-zA-Z0-9]/g, '').toUpperCase()}-001`,
-        reviewer_name: 'Dr. J Patel',
-        reviewer_role: 'PRINCIPAL_INVESTIGATOR',
-        decision: admetReviewDecision,
-        review_notes: admetReviewNotes,
+      const { data } = await api.post('/admet/review', {
+        analysis_id: selectedReview.analysis_id, decision: admetReviewDecision, review_notes: admetReviewNotes,
       });
+      setReviewTimestamp(data.timestamp);
       setAdmetReviewStatus('REVIEWED');
-      setReviewTimestamp(ts);
-      toast.success('Final Investigator Sign-Off recorded', {
-        description: 'Review complete; no further routing required.',
-      });
+      setPendingReviews(records => records.filter(record => record.analysis_id !== reviewId));
+      setReviewId('');
+      toast.success('Investigator decision recorded');
     } catch {
-      setAdmetReviewStatus('REVIEWED');
-      setReviewTimestamp(ts);
-      toast.success('Final Investigator Sign-Off recorded');
+      toast.error('Could not record the decision. Refresh the review queue and try again.');
+    } finally {
+      setSavingReview(false);
     }
   };
 
@@ -379,7 +389,7 @@ export function SimulationLabPage() {
       </div>
 
       {/* ADMET Review Status / Confirmation Banner (Terminates at PI) */}
-      {admetReviewStatus === 'REVIEWED' ? (
+      {admetReviewStatus === 'REVIEWED' && !pendingReviews.length ? (
         <div className="rounded-2xl border border-emerald-300 bg-gradient-to-r from-emerald-50 via-teal-50 to-white p-4 shadow-sm animate-in fade-in">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-start gap-3">
@@ -399,7 +409,7 @@ export function SimulationLabPage() {
                   ✓ Final Sign-Off Recorded by Principal Investigator (Review complete; no further routing required)
                 </h4>
                 <p className="text-xs text-slate-600 mt-0.5 max-w-3xl">
-                  {admetReviewNotes} · Recorded by Dr. J Patel (Lead PI)
+                  {admetReviewNotes} · Recorded by {user?.name}
                 </p>
               </div>
             </div>
@@ -420,7 +430,7 @@ export function SimulationLabPage() {
                   Investigator ADMET Review &amp; Clinical Sign-Off
                 </h3>
                 <p className="text-xs text-slate-500">
-                  Human-in-the-loop clinical review gate for compound {activeProfile.formula}. Decision terminates here at the PI.
+                  Select an assigned analysis to review its recorded result.
                 </p>
               </div>
             </div>
@@ -429,6 +439,15 @@ export function SimulationLabPage() {
             </span>
           </div>
 
+          <label className="block text-sm">Assigned analysis
+            <select value={reviewId} onChange={event => setReviewId(event.target.value)} className="w-full rounded border p-2">
+              <option value="">Select a pending review</option>
+              {pendingReviews.map(record => <option key={record.analysis_id} value={record.analysis_id}>
+                {record.compound_name} · {record.study_id} · {record.analysis_id}
+              </option>)}
+            </select>
+          </label>
+          {selectedReview && <p>{selectedReview.dose_context.dose_amount} {selectedReview.dose_context.unit} · {selectedReview.verdict} · {selectedReview.coordinator_notes}</p>}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
             <div>
               <label className="text-xs font-semibold text-slate-700 block mb-1.5">
@@ -483,7 +502,7 @@ export function SimulationLabPage() {
               Sign-off records final audit sign-off with no onward forwarding required.
             </p>
             <Button
-              onClick={handlePiSignOff}
+              disabled={!selectedReview || savingReview} onClick={handlePiSignOff}
               className="bg-purple-700 hover:bg-purple-800 text-white gap-2 text-xs font-bold px-5 shadow-sm"
             >
               <ShieldCheck className="h-4 w-4" />
@@ -497,7 +516,7 @@ export function SimulationLabPage() {
             <Clock className="h-5 w-5 text-amber-600" />
             <div>
               <p className="text-xs font-bold text-amber-900">ADMET Simulation Submitted to PI</p>
-              <p className="text-xs text-amber-700">Awaiting clinical review and sign-off by Dr. J Patel.</p>
+              <p className="text-xs text-amber-700">Awaiting clinical review and sign-off by the assigned investigator.</p>
             </div>
           </div>
           <span className="text-xs font-semibold text-amber-800 bg-amber-100 px-2.5 py-1 rounded-lg">
@@ -516,10 +535,16 @@ export function SimulationLabPage() {
               </div>
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Submit Simulation for PI Review</h3>
-                <p className="text-xs text-slate-500">Route ADMET profile to Dr. J Patel for final clinical sign-off.</p>
+                <p className="text-xs text-slate-500">Select the study whose investigator should review this analysis.</p>
               </div>
             </div>
             <div>
+              <label className="block text-sm">Study
+                <select value={studyId} onChange={event => setStudyId(event.target.value)} className="w-full rounded border p-2">
+                  <option value="">Select a study</option>
+                  {studies.map(study => <option key={study.id} value={study.id}>{study.name}</option>)}
+                </select>
+              </label>
               <label className="text-xs font-semibold text-slate-700 block mb-1">Coordinator Notes &amp; Rationale</label>
               <textarea
                 rows={3}
@@ -533,7 +558,7 @@ export function SimulationLabPage() {
               <Button variant="outline" size="sm" onClick={() => setShowCoordinatorModal(false)} className="text-xs">
                 Cancel
               </Button>
-              <Button size="sm" onClick={handleSubmitToPi} className="bg-purple-600 hover:bg-purple-700 text-white text-xs gap-1.5">
+              <Button size="sm" disabled={!studyId || savingReview} onClick={handleSubmitToPi} className="bg-purple-600 hover:bg-purple-700 text-white text-xs gap-1.5">
                 Submit to PI
               </Button>
             </div>

@@ -110,7 +110,7 @@ function NormalizedModel({
   affectedZones,
 }: ModelSceneProps) {
   const config = SYSTEM_CONFIGS[system];
-  const { scene } = useGLTF(config.modelPath);
+  const { scene } = useGLTF(config.modelPath, "/draco/");
   const groupRef = useRef<THREE.Group>(null);
 
   const isAmlodipine = compoundId.toLowerCase().includes('c20') || compoundId.toLowerCase().includes('amlo');
@@ -408,14 +408,14 @@ export function AnatomySpace3D({
 
   const handleZoomIn = () => {
     if (controlsRef.current) {
-      controlsRef.current.dollyIn(1.25);
+      controlsRef.current.dollyIn(0.8);
       controlsRef.current.update();
     }
   };
 
   const handleZoomOut = () => {
     if (controlsRef.current) {
-      controlsRef.current.dollyOut(1.25);
+      controlsRef.current.dollyOut(0.8);
       controlsRef.current.update();
     }
   };
@@ -654,9 +654,3 @@ export function AnatomySpace3D({
     </div>
   );
 }
-
-// Preload models
-useGLTF.preload('/skeleton.glb');
-useGLTF.preload('/vascular_system.glb');
-useGLTF.preload('/visceral_system.glb');
-useGLTF.preload('/nervous_system.glb');

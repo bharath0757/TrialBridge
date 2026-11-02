@@ -28,9 +28,15 @@ def create_indexes(db):
         IndexModel([("study_code", ASCENDING)], unique=True)
     ])
     
+    db.admet_analyses.create_indexes([
+        IndexModel([("analysis_id", ASCENDING)]),
+        IndexModel([("created_by", ASCENDING), ("created_at", DESCENDING)]),
+        IndexModel([("assigned_pi", ASCENDING), ("review_status", ASCENDING), ("created_at", DESCENDING)]),
+    ])
     # Participants
     db.participants.create_indexes([
         IndexModel([("participant_code", ASCENDING)], unique=True),
+        IndexModel([("user_id", ASCENDING)]),
         IndexModel([("organization_id", ASCENDING)]),
         IndexModel([("site_id", ASCENDING)])
     ])

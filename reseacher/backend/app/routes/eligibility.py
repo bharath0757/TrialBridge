@@ -3,7 +3,7 @@ from typing import List, Optional, Dict, Any
 from bson import ObjectId
 from app.db.mongodb import get_db
 from app.core.security import get_current_user
-from app.core.permissions import require_role
+from app.core.permissions import require_role, require_study_record, require_study_access, accessible_study_ids, require_participant_self_access
 from app.models.eligibility import EligibilityReviewResponse, EligibilityDecision
 from app.services.eligibility_service import submit_to_pi, approve_eligibility, reject_eligibility, request_more_info
 from app.repositories import eligibility as el_repo
@@ -113,6 +113,8 @@ def _enrich_review(db, rev: dict) -> dict:
 
 @router.post("/submit")
 def submit_eligibility(participant_id: str, study_id: str, notes: str = "", db = Depends(get_db), current_user: dict = Depends(require_role("RESEARCH_COORDINATOR", "PLATFORM_ADMIN"))):
+    require_study_access(current_user, study_id, db)
+    require_participant_self_access(current_user, participant_id, db)
     review_id = submit_to_pi(db, participant_id, study_id, current_user["id"], notes)
     return {"status": "success", "review_id": review_id}
 
@@ -124,7 +126,10 @@ def get_pending_reviews(
 ):
     query = {"status": "PENDING_PI_REVIEW"}
     if study_id:
+        require_study_access(current_user, study_id, db)
         query["study_id"] = study_id
+    elif current_user["role"] != "PLATFORM_ADMIN":
+        query["study_id"] = {"$in": accessible_study_ids(current_user, db)}
         
     ers = list(db.eligibility_reviews.find(query).sort("created_at", -1))
     return [_enrich_review(db, er) for er in ers]
@@ -135,21 +140,25 @@ def get_reviews_by_study(
     db = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
+    require_study_access(current_user, study_id, db)
     ers = list(db.eligibility_reviews.find({"study_id": study_id}).sort("created_at", -1))
     return [_enrich_review(db, er) for er in ers]
 
 @router.post("/{review_id}/approve")
 def approve(review_id: str, decision: EligibilityDecision, db = Depends(get_db), current_user: dict = Depends(require_role("PRINCIPAL_INVESTIGATOR", "PLATFORM_ADMIN"))):
+    require_study_record(current_user, db.eligibility_reviews, review_id, db)
     approve_eligibility(db, review_id, current_user["id"], decision.reason)
     return {"status": "success", "message": "Clinical eligibility confirmed by Principal Investigator."}
 
 @router.post("/{review_id}/reject")
 def reject(review_id: str, decision: EligibilityDecision, db = Depends(get_db), current_user: dict = Depends(require_role("PRINCIPAL_INVESTIGATOR", "PLATFORM_ADMIN"))):
+    require_study_record(current_user, db.eligibility_reviews, review_id, db)
     reject_eligibility(db, review_id, current_user["id"], decision.reason)
     return {"status": "success", "message": "Clinical ineligibility confirmed by Principal Investigator."}
 
 @router.post("/{review_id}/request-info")
 def req_info(review_id: str, decision: EligibilityDecision, db = Depends(get_db), current_user: dict = Depends(require_role("PRINCIPAL_INVESTIGATOR", "PLATFORM_ADMIN"))):
+    require_study_record(current_user, db.eligibility_reviews, review_id, db)
     request_more_info(db, review_id, current_user["id"], decision.reason)
     return {"status": "success", "message": "Information clarification request sent to coordinator."}
 

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 from app.db.mongodb import get_db
 from app.core.security import get_current_user
-from app.core.permissions import require_role, require_participant_self_access, linked_participant_ids, find_record
+from app.core.permissions import require_role, require_study_access, require_participant_self_access, linked_participant_ids, find_record
 from app.core.connections import connection_manager
 from app.services.notification_service import create_notification
 from app.models.participant import ParticipantResponse, ParticipantCreate
@@ -21,6 +21,7 @@ class TrialDecisionRequest(BaseModel):
     notification_id: Optional[str] = None
 
 class ScreeningApproveRequest(BaseModel):
+    study_id: Optional[str] = None
     reviewer_name: Optional[str] = None
     notes: Optional[str] = None
 
@@ -131,7 +132,8 @@ def read_participants(db = Depends(get_db), current_user: dict = Depends(get_cur
         identifiers = linked_participant_ids(current_user, db)
         return _enrich_participants(db, [find_record(db.participants, pid) for pid in identifiers])
     elif current_user["role"] == "ORGANIZATION":
-        ps = participant_repo.list_by_org(db, current_user.get("organization_id"))
+        org = current_user.get("organization_id")
+        ps = participant_repo.list_by_org(db, org) if org else []
     elif current_user['role'] == 'PLATFORM_ADMIN':
         ps = participant_repo.list_all(db)
     else:
@@ -141,7 +143,17 @@ def read_participants(db = Depends(get_db), current_user: dict = Depends(get_cur
 
 @router.post("/", response_model=ParticipantResponse)
 def create_participant(p_in: ParticipantCreate, db = Depends(get_db), current_user: dict = Depends(require_role("PLATFORM_ADMIN", "ORGANIZATION", "RESEARCH_COORDINATOR"))):
-    return participant_repo.create(db, p_in.model_dump())
+    data = p_in.model_dump()
+    if current_user["role"] != "PLATFORM_ADMIN":
+        org = current_user.get("organization_id")
+        if not org or (data.get("organization_id") and data["organization_id"] != org):
+            raise HTTPException(403, "Cannot create participants outside your organization")
+        data["organization_id"] = org
+        if data.get("user_id"):
+            account = find_record(db.users, data["user_id"])
+            if not account or account.get("role") != "PARTICIPANT" or account.get("organization_id") != org:
+                raise HTTPException(403, "Cannot link that participant account")
+    return participant_repo.create(db, data)
 
 @router.get("/{id}", response_model=ParticipantResponse)
 def read_participant(id: str, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
@@ -170,42 +182,28 @@ def approve_participant_screening(
     db = Depends(get_db),
     current_user: dict = Depends(require_role("PLATFORM_ADMIN", "RESEARCH_COORDINATOR", "PRINCIPAL_INVESTIGATOR"))
 ):
-    try:
-        from bson import ObjectId
-    except ImportError:
-        ObjectId = None
-
-    p_doc = None
-    if ObjectId:
-        try:
-            p_doc = db.participants.find_one({"_id": ObjectId(id)})
-        except Exception:
-            p_doc = db.participants.find_one({"_id": id})
-    else:
-        p_doc = db.participants.find_one({"_id": id})
-
+    require_participant_self_access(current_user, id, db)
+    p_doc = find_record(db.participants, id)
     if not p_doc:
-        p_doc = db.participants.find_one({"id": id})
-    if not p_doc:
-        raise HTTPException(status_code=404, detail="Participant not found")
-
-    user_id = p_doc.get("user_id") or id
-    study_id = p_doc.get("study_id") or "ST-001"
-
-    query_filter = {"id": id}
-    if ObjectId:
-        try:
-            query_filter = {"$or": [{"_id": ObjectId(id)}, {"_id": id}, {"id": id}]}
-        except Exception:
-            pass
-
+        raise HTTPException(404, "Participant not found")
+    user_id = p_doc.get("user_id")
+    if not user_id:
+        raise HTTPException(409, "Participant needs a linked account to receive the invitation")
+    study_id = (body.study_id if body else None) or p_doc.get("study_id")
+    if not study_id:
+        assignments = db.study_participants.distinct("study_id", {"participant_id": id})
+        if len(assignments) != 1:
+            raise HTTPException(422, "Select a study for this invitation")
+        study_id = assignments[0]
+    require_study_access(current_user, study_id, db)
+    query_filter = {"_id": p_doc["_id"]}
     db.participants.update_one(
         query_filter,
         {"$set": {"screening_status": "APPROVED", "updated_at": datetime.utcnow()}}
     )
 
     db.study_participants.update_one(
-        {"participant_id": id},
+        {"participant_id": id, "study_id": study_id},
         {"$set": {"screening_status": "APPROVED", "status": "ELIGIBLE", "updated_at": datetime.utcnow()}},
         upsert=True
     )
@@ -249,226 +247,24 @@ def record_trial_decision(
     db = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    try:
-        from bson import ObjectId
-    except ImportError:
-        ObjectId = None
+    from bson import ObjectId
+    from app.routes.notifications import NotificationActionRequest, take_notification_action
 
-    decision = body.decision.upper()
-    if decision not in ["ACCEPT", "REJECT"]:
-        raise HTTPException(status_code=400, detail="Decision must be ACCEPT or REJECT")
-
-    p_doc = None
-    if ObjectId:
-        try:
-            p_doc = db.participants.find_one({"_id": ObjectId(id)})
-        except Exception:
-            p_doc = db.participants.find_one({"_id": id})
-    else:
-        p_doc = db.participants.find_one({"_id": id})
-
-    if not p_doc:
-        p_doc = db.participants.find_one({"id": id})
-
-    study_id = body.study_id
-    if not study_id and p_doc:
-        study_id = p_doc.get("study_id")
-    if not study_id:
-        sp = db.study_participants.find_one({"participant_id": id})
-        if sp:
-            study_id = sp.get("study_id")
-    if not study_id:
-        study_id = "ST-001"
-
-    participant_name = p_doc.get("name", f"Participant {id}") if p_doc else f"Participant {id}"
-    user_id = p_doc.get("user_id") if p_doc else current_user.get("id")
-
-    query_filter = {"id": id}
-    if ObjectId:
-        try:
-            query_filter = {"$or": [{"_id": ObjectId(id)}, {"_id": id}, {"id": id}]}
-        except Exception:
-            pass
-
-    if decision == "ACCEPT":
-        # 1. Update participant and study_participants
-        try:
-            db.participants.update_one(
-                query_filter,
-                {"$set": {"status": "ENROLLED", "enrollment_status": "ENROLLED", "updated_at": datetime.utcnow()}}
-            )
-        except Exception:
-            pass
-
-        db.study_participants.update_one(
-            {"participant_id": id, "study_id": str(study_id)},
-            {"$set": {"status": "ENROLLED", "updated_at": datetime.utcnow()}},
-            upsert=True
-        )
-
-        # 2. Update notification if provided
-        if body.notification_id:
-            try:
-                notif_filter = {"id": body.notification_id}
-                if ObjectId:
-                    notif_filter = {"$or": [{"_id": ObjectId(body.notification_id)}, {"_id": body.notification_id}, {"id": body.notification_id}]}
-                db.notifications.update_one(
-                    notif_filter,
-                    {"$set": {"action_taken": "ACCEPT", "read": True, "updated_at": datetime.utcnow()}}
-                )
-            except Exception:
-                pass
-        else:
-            db.notifications.update_many(
-                {"recipient_id": str(user_id), "type": "TRIAL_INVITATION"},
-                {"$set": {"action_taken": "ACCEPT", "read": True}}
-            )
-
-        # 3. Automatically schedule baseline visit (3 days in future at 10:00 AM)
-        visit_date = (datetime.utcnow() + timedelta(days=3)).strftime("%Y-%m-%d")
-        visit_doc = {
-            "participant_id": id,
-            "participantId": id,
-            "participant_name": participant_name,
-            "study_id": str(study_id),
-            "studyId": str(study_id),
-            "studyName": "Type 2 Diabetes Renal Dynamics Study",
-            "visit_name": "Baseline Clinical Intake & Physical Exam",
-            "type": "Baseline Clinical Intake",
-            "date": visit_date,
-            "time": "10:00 AM",
-            "location": "Clinical Trial Unit - Suite 302",
-            "status": "scheduled",
-            "notes": "Automated baseline visit created upon participant trial acceptance.",
-            "created_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow()
-        }
-        v_res = db.visits.insert_one(visit_doc)
-        visit_id = str(v_res.inserted_id)
-        visit_doc["id"] = visit_id
-        visit_doc["_id"] = visit_id
-
-        # 4. Insert message in db.messages
-        study_doc = None
-        if ObjectId:
-            try:
-                study_doc = db.studies.find_one({"_id": ObjectId(study_id)})
-            except Exception:
-                study_doc = db.studies.find_one({"_id": study_id})
-        else:
-            study_doc = db.studies.find_one({"_id": study_id})
-
-        pi_id = study_doc.get("principal_investigator_id") if study_doc else None
-
-        try:
-            db.messages.insert_one({
-                "from_user_id": str(user_id),
-                "to_user_id": str(pi_id) if pi_id else "investigator",
-                "sender_name": participant_name,
-                "recipient_name": "Principal Investigator",
-                "sender_role": "PARTICIPANT",
-                "subject": "Trial Acceptance Confirmation",
-                "content": f"I have accepted the invitation for the clinical trial. Baseline visit automatically scheduled for {visit_date} at 10:00 AM.",
-                "read": False,
-                "created_at": datetime.utcnow()
-            })
-        except Exception as e:
-            print(f"Warning: Message insert failed: {e}")
-
-        # 5. Emit notification to PI and coordinator
-        admin_message = f"Participant {participant_name} has accepted the trial invitation! A baseline clinical visit has been automatically scheduled for {visit_date}."
-        if pi_id:
-            create_notification(
-                db=db,
-                recipient_id=str(pi_id),
-                type="TRIAL_ACCEPTED",
-                title="Participant Trial Accepted",
-                message=admin_message,
-                entity_type="visit",
-                entity_id=visit_id,
-                metadata={"participant_id": id, "study_id": str(study_id), "visit_date": visit_date}
-            )
-
-        # Broadcast real-time WebSocket event
-        event_payload = {
-            "event": "TRIAL_DECISION_ACCEPTED",
-            "participant_id": id,
-            "participant_name": participant_name,
-            "study_id": str(study_id),
-            "visit": {
-                "id": visit_id,
-                "visit_name": "Baseline Clinical Intake & Physical Exam",
-                "type": "Baseline Clinical Intake",
-                "date": visit_date,
-                "time": "10:00 AM",
-                "status": "scheduled",
-                "location": "Clinical Trial Unit - Suite 302"
-            }
-        }
-        connection_manager.dispatch_role_message_sync("PRINCIPAL_INVESTIGATOR", event_payload)
-        connection_manager.dispatch_role_message_sync("RESEARCH_COORDINATOR", event_payload)
-        connection_manager.dispatch_personal_message_sync(str(user_id), event_payload)
-
-        return {
-            "status": "success",
-            "decision": "ACCEPT",
-            "message": "Trial invitation accepted. Baseline visit scheduled.",
-            "participant_id": id,
-            "visit": {
-                "id": visit_id,
-                "type": "Baseline Clinical Intake",
-                "date": visit_date,
-                "time": "10:00 AM",
-                "location": "Clinical Trial Unit - Suite 302",
-                "status": "scheduled"
-            }
-        }
-    else:
-        # REJECT
-        try:
-            db.participants.update_one(
-                query_filter,
-                {"$set": {"status": "DECLINED", "enrollment_status": "DECLINED", "updated_at": datetime.utcnow()}}
-            )
-        except Exception:
-            pass
-
-        db.study_participants.update_one(
-            {"participant_id": id, "study_id": str(study_id)},
-            {"$set": {"status": "NOT_ENROLLED", "updated_at": datetime.utcnow()}},
-            upsert=True
-        )
-
-        if body.notification_id:
-            try:
-                notif_filter = {"id": body.notification_id}
-                if ObjectId:
-                    notif_filter = {"$or": [{"_id": ObjectId(body.notification_id)}, {"_id": body.notification_id}, {"id": body.notification_id}]}
-                db.notifications.update_one(
-                    notif_filter,
-                    {"$set": {"action_taken": "REJECT", "read": True, "updated_at": datetime.utcnow()}}
-                )
-            except Exception:
-                pass
-
-        # Notify researcher
-        decline_message = f"Participant {participant_name} declined the clinical trial invitation."
-        connection_manager.dispatch_role_message_sync("PRINCIPAL_INVESTIGATOR", {
-            "event": "TRIAL_DECISION_REJECTED",
-            "participant_id": id,
-            "participant_name": participant_name,
-            "message": decline_message
-        })
-        connection_manager.dispatch_role_message_sync("RESEARCH_COORDINATOR", {
-            "event": "TRIAL_DECISION_REJECTED",
-            "participant_id": id,
-            "participant_name": participant_name,
-            "message": decline_message
-        })
-
-        return {
-            "status": "success",
-            "decision": "REJECT",
-            "message": "Trial invitation declined.",
-            "participant_id": id
-        }
+    if current_user["role"] != "PARTICIPANT":
+        raise HTTPException(403, "Only participants can answer their invitations")
+    require_participant_self_access(current_user, id, db)
+    query = {"recipient_id": current_user["id"], "type": "TRIAL_INVITATION", "metadata.participant_id": id}
+    if body.study_id:
+        query["metadata.study_id"] = body.study_id
+    if body.notification_id:
+        keys = [body.notification_id]
+        if ObjectId.is_valid(body.notification_id):
+            keys.append(ObjectId(body.notification_id))
+        query["$or"] = [{"_id": {"$in": keys}}, {"id": body.notification_id}]
+    invitations = list(db.notifications.find(query).sort("created_at", -1).limit(2))
+    if not invitations:
+        raise HTTPException(404, "Trial invitation not found")
+    if len(invitations) > 1 and not body.notification_id and not body.study_id:
+        raise HTTPException(422, "Select the invitation to answer")
+    result = take_notification_action(str(invitations[0]["_id"]), NotificationActionRequest(action=body.decision), db, current_user)
+    return {**result, "decision": body.decision.upper(), "participant_id": id}

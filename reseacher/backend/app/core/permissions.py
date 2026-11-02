@@ -68,6 +68,34 @@ def require_participant_self_access(user: dict, participant_id: str, db):
     return True
 
 
+def study_filter(user, db):
+    if user['role'] == 'PLATFORM_ADMIN':
+        return {}
+    if user['role'] == 'PRINCIPAL_INVESTIGATOR':
+        return {'principal_investigator_id': user['id']}
+    if user['role'] in {'ORGANIZATION', 'RESEARCH_COORDINATOR'} and user.get('organization_id'):
+        return {'organization_id': user['organization_id']}
+    if user['role'] == 'PARTICIPANT':
+        from bson import ObjectId
+        ids = db.study_participants.distinct('study_id', {'participant_id': {'$in': linked_participant_ids(user, db)}})
+        keys = ids + [ObjectId(key) for key in ids if isinstance(key, str) and ObjectId.is_valid(key)]
+        return {'$or': [{key: {'$in': keys}} for key in ('_id', 'id', 'study_code')]}
+    return {'_id': {'$in': []}}
+
+
+def accessible_study_ids(user, db):
+    studies = db.studies.find(study_filter(user, db), {'id': 1, 'study_code': 1})
+    return [str(study[key]) for study in studies for key in ('_id', 'id', 'study_code') if study.get(key) is not None]
+
+
+def require_study_record(user, collection, identifier, db):
+    record = find_record(collection, identifier)
+    if not record or not record.get('study_id'):
+        raise HTTPException(status_code=404, detail='Study record not found')
+    require_study_access(user, record['study_id'], db)
+    return record
+
+
 def clinical_record_scope(user: dict, db):
     """Scope private clinical records to the participant or assigned research team."""
     if user['role'] == 'PLATFORM_ADMIN':
@@ -75,15 +103,7 @@ def clinical_record_scope(user: dict, db):
     if user['role'] == 'PARTICIPANT':
         return {'participant_id': {'$in': linked_participant_ids(user, db)}}
     org_id = user.get('organization_id')
-    if user['role'] == 'PRINCIPAL_INVESTIGATOR':
-        studies = db.studies.find({'principal_investigator_id': user['id']})
-    elif org_id:
-        studies = db.studies.find({'organization_id': org_id})
-    else:
-        studies = []
-    study_ids = []
-    for study in studies:
-        study_ids.extend(str(study[key]) for key in ('_id', 'id', 'study_code') if study.get(key) is not None)
+    study_ids = accessible_study_ids(user, db)
     participant_ids = [str(p['_id']) for p in db.participants.find({'organization_id': org_id})] if org_id else []
     return {'$or': [
         {'study_id': {'$in': study_ids}},

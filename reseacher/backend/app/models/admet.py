@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Dict, Any
+from typing import Literal, Optional, List, Dict, Any
 from datetime import datetime
 
 
@@ -102,6 +102,8 @@ class AdmetAnalyzeResponse(BaseModel):
     participant_context: Optional[ParticipantContext] = None
     protocol_context: ProtocolContext
     created_at: str
+    study_id: Optional[str] = None
+    coordinator_notes: Optional[str] = None
     review_status: str = 'DRAFT'
     review_details: Optional[Dict[str, Any]] = None
     disclaimer: str
@@ -124,7 +126,7 @@ class DoseComparisonRequest(BaseModel):
     smiles: str = 'CN(C)C(=N)NC(=N)N'
     participant_context: Optional[ParticipantContext] = None
     protocol_context: Optional[ProtocolContext] = None
-    dose_levels: Optional[List[float]] = None
+    dose_levels: Optional[List[float]] = Field(default=None, max_length=32)
 
 class DoseComparisonResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
@@ -138,10 +140,8 @@ class DoseComparisonResponse(BaseModel):
 
 class AdmetReviewRequest(BaseModel):
     analysis_id: str
-    reviewer_name: str
-    reviewer_role: str
-    decision: str
-    review_notes: str
+    decision: Literal["APPROVED", "REJECTED"]
+    review_notes: str = Field(max_length=4000)
 
 class AdmetReviewResponse(BaseModel):
     review_id: str

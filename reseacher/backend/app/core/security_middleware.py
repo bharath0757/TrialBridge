@@ -3,6 +3,7 @@ import uuid
 from typing import Optional
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 from datetime import datetime
 
@@ -57,7 +58,7 @@ class SecurityEventMiddleware(BaseHTTPMiddleware):
                 user_agent = request.headers.get("user-agent", "unknown")
                 
                 # Base event dict
-                def create_security_event(event_type: str, severity: str, additional_details: dict = None):
+                async def create_security_event(event_type: str, severity: str, additional_details: dict = None):
                     event = {
                         "request_id": request_id,
                         "timestamp": datetime.utcnow(),
@@ -73,26 +74,26 @@ class SecurityEventMiddleware(BaseHTTPMiddleware):
                         "user_agent": user_agent,
                         "details": additional_details or {}
                     }
-                    db.security_events.insert_one(event)
+                    await run_in_threadpool(db.security_events.insert_one, event)
 
                 # c. For 401 responses
                 if status_code == 401:
                     if "/auth/login" in path:
-                        create_security_event("LOGIN_FAILED", "MEDIUM")
+                        await create_security_event("LOGIN_FAILED", "MEDIUM")
                     else:
-                        create_security_event("ACCESS_DENIED", "MEDIUM")
+                        await create_security_event("ACCESS_DENIED", "MEDIUM")
                 
                 # d. For 403 responses
                 elif status_code == 403:
-                    create_security_event("ACCESS_DENIED", "HIGH")
+                    await create_security_event("ACCESS_DENIED", "HIGH")
                     
                 # e. For 429 responses
                 elif status_code == 429:
-                    create_security_event("RATE_LIMIT_EXCEEDED", "MEDIUM")
+                    await create_security_event("RATE_LIMIT_EXCEEDED", "MEDIUM")
                     
                 # f. For 5xx responses
                 elif status_code >= 500:
-                    create_security_event("API_ERROR", "HIGH")
+                    await create_security_event("API_ERROR", "HIGH")
                     
                 # g. For successful requests to PHI endpoints
                 elif 200 <= status_code < 300:
@@ -109,7 +110,7 @@ class SecurityEventMiddleware(BaseHTTPMiddleware):
                             "duration_ms": duration_ms,
                             "ip_address": ip
                         }
-                        db.access_events.insert_one(access_event)
+                        await run_in_threadpool(db.access_events.insert_one, access_event)
                         
                     # h. For successful requests returning large result sets
                     # We check if it's a GET request (list endpoint) and potentially has large data.
@@ -121,7 +122,7 @@ class SecurityEventMiddleware(BaseHTTPMiddleware):
                     record_count_str = response.headers.get("X-Record-Count") or response.headers.get("X-Total-Count")
                     if record_count_str and record_count_str.isdigit():
                         if int(record_count_str) > 50 and method == "GET":
-                            create_security_event("BULK_EXPORT", "MEDIUM", {"record_count": int(record_count_str)})
+                            await create_security_event("BULK_EXPORT", "MEDIUM", {"record_count": int(record_count_str)})
                         
         except Exception:
             # NEVER block the main request if logging fails

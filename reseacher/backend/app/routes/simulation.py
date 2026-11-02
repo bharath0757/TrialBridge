@@ -54,6 +54,10 @@ def get_sim_results(
     db = Depends(get_db),
     current_user: dict = Depends(require_role("PRINCIPAL_INVESTIGATOR", "RESEARCH_COORDINATOR"))
 ):
+    from app.core.permissions import find_record
+    simulation = find_record(db.simulations, id)
+    if not simulation or simulation.get("created_by") != current_user["id"]:
+        raise HTTPException(404, "Simulation not found")
     res = db.simulation_results.find_one({"simulation_id": id})
     if not res:
         raise HTTPException(status_code=404, detail="Not found")

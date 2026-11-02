@@ -5,10 +5,13 @@ from app.services.notification_service import create_notification
 from fastapi import HTTPException
 
 def submit_to_pi(db, participant_id: str, study_id: str, coordinator_id: str, coordinator_notes: str):
-    study = db.studies.find_one({"_id": ObjectId(study_id)})
+    from app.repositories.studies import get_by_id
+    study = get_by_id(db, study_id)
     if not study:
         raise HTTPException(status_code=404, detail="Study not found")
         
+    if not study.get("principal_investigator_id"):
+        raise HTTPException(409, "Study needs an assigned investigator")
     er_data = {
         "study_id": study_id,
         "participant_id": participant_id,
@@ -39,9 +42,7 @@ def approve_eligibility(db, review_id: str, pi_id: str, reason: str):
     review = db.eligibility_reviews.find_one({"_id": ObjectId(review_id)})
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
-    if review.get("assigned_to_pi") and review["assigned_to_pi"] not in [pi_id, "pi"]:
-        # Verify access
-        pass
+
         
     db.eligibility_reviews.update_one(
         {"_id": ObjectId(review_id)},
@@ -105,7 +106,7 @@ def approve_eligibility(db, review_id: str, pi_id: str, reason: str):
     # 4. Broadcast WebSocket Event
     try:
         from app.core.connections import connection_manager
-        connection_manager.dispatch_role_message_sync("RESEARCH_COORDINATOR", {
+        connection_manager.dispatch_personal_message_sync(str(review.get("coordinator_id")), {
             "event": "ELIGIBILITY_REVIEW_FINALIZED",
             "review_id": review_id,
             "study_id": str(review.get("study_id")),
@@ -128,7 +129,7 @@ def approve_eligibility(db, review_id: str, pi_id: str, reason: str):
         
     participant_user_id = participant.get("user_id") if participant else None
     if not participant_user_id:
-        participant_user_id = str(review["participant_id"])
+        return True  # No verified account to receive an invitation.
 
     # Create actionable notification for participant
     try:
@@ -219,7 +220,7 @@ def reject_eligibility(db, review_id: str, pi_id: str, reason: str):
     # Broadcast WebSocket
     try:
         from app.core.connections import connection_manager
-        connection_manager.dispatch_role_message_sync("RESEARCH_COORDINATOR", {
+        connection_manager.dispatch_personal_message_sync(str(review.get("coordinator_id")), {
             "event": "ELIGIBILITY_REVIEW_FINALIZED",
             "review_id": review_id,
             "study_id": str(review.get("study_id")),
@@ -280,7 +281,7 @@ def request_more_info(db, review_id: str, pi_id: str, reason: str):
     # Broadcast WebSocket
     try:
         from app.core.connections import connection_manager
-        connection_manager.dispatch_role_message_sync("RESEARCH_COORDINATOR", {
+        connection_manager.dispatch_personal_message_sync(str(review.get("coordinator_id")), {
             "event": "ELIGIBILITY_REVIEW_FINALIZED",
             "review_id": review_id,
             "study_id": str(review.get("study_id")),

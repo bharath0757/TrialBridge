@@ -6,8 +6,8 @@ def create(db, audit_data: dict) -> dict:
     audit_data["_id"] = str(result.inserted_id)
     return audit_data
 
-def list_all(db) -> List[dict]:
-    logs = list(db.audit_logs.find().sort("timestamp", -1))
+def list_all(db, query=None) -> List[dict]:
+    logs = list(db.audit_logs.find(query or {}).sort("timestamp", -1))
     for log in logs:
         log["_id"] = str(log["_id"])
     return logs

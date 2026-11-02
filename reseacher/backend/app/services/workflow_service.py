@@ -1,21 +1,24 @@
-from bson import ObjectId
+from app.core.permissions import find_record
+from app.repositories.studies import get_by_id as get_study
 from datetime import datetime
 from app.services.audit_service import log_action
 from app.services.notification_service import create_notification
 from fastapi import HTTPException
 
 def submit_consent(db, consent_id: str, participant_id: str):
-    consent = db.consents.find_one({"_id": ObjectId(consent_id)})
+    consent = find_record(db.consents, consent_id)
     if not consent or consent["participant_id"] != participant_id:
         raise HTTPException(status_code=404, detail="Consent not found")
         
-    db.consents.update_one(
-        {"_id": ObjectId(consent_id)},
+    result = db.consents.update_one(
+        {"_id": consent["_id"], "status": {"$in": ["PENDING", "pending", "SENT", "sent"]}},
         {"$set": {"status": "SIGNED", "signed_at": datetime.utcnow()}}
     )
     
+    if not result.matched_count:
+        raise HTTPException(409, "Only pending consent can be signed")
     # Notify coordinators/PI
-    study = db.studies.find_one({"_id": ObjectId(consent["study_id"])})
+    study = get_study(db, consent["study_id"])
     if study:
         create_notification(
             db, study["principal_investigator_id"], "CONSENT_SIGNED",
@@ -27,15 +30,17 @@ def submit_consent(db, consent_id: str, participant_id: str):
     return True
 
 def verify_consent(db, consent_id: str, coordinator_id: str):
-    consent = db.consents.find_one({"_id": ObjectId(consent_id)})
+    consent = find_record(db.consents, consent_id)
     if not consent:
         raise HTTPException(status_code=404, detail="Consent not found")
         
-    db.consents.update_one(
-        {"_id": ObjectId(consent_id)},
+    result = db.consents.update_one(
+        {"_id": consent["_id"], "status": {"$in": ["SIGNED", "signed"]}},
         {"$set": {"status": "VERIFIED", "verified_at": datetime.utcnow(), "verified_by": coordinator_id}}
     )
     
+    if not result.matched_count:
+        raise HTTPException(409, "Consent must be signed before verification")
     db.study_participants.update_one(
         {"participant_id": consent["participant_id"], "study_id": consent["study_id"]},
         {"$set": {"status": "CONSENTED"}}
@@ -45,7 +50,7 @@ def verify_consent(db, consent_id: str, coordinator_id: str):
     return True
 
 def approve_enrollment(db, enrollment_id: str, pi_id: str):
-    enrollment = db.enrollments.find_one({"_id": ObjectId(enrollment_id)})
+    enrollment = find_record(db.enrollments, enrollment_id)
     if not enrollment:
         raise HTTPException(status_code=404, detail="Enrollment not found")
         
@@ -62,7 +67,7 @@ def approve_enrollment(db, enrollment_id: str, pi_id: str):
         raise HTTPException(status_code=400, detail="Consent must be VERIFIED first")
         
     db.enrollments.update_one(
-        {"_id": ObjectId(enrollment_id)},
+        {"_id": enrollment["_id"]},
         {"$set": {"status": "APPROVED", "approved_at": datetime.utcnow(), "approved_by": pi_id}}
     )
     

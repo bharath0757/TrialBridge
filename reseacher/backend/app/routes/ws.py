@@ -1,10 +1,13 @@
+import asyncio
+import time
 import json
+from fastapi.concurrency import run_in_threadpool
 import logging
 from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 from app.core.connections import connection_manager
-from app.core.security import verify_token
+from app.core.security import verify_token, get_current_user
 
 logger = logging.getLogger("ws")
 router = APIRouter()
@@ -22,7 +25,9 @@ async def websocket_notifications(
     role: Optional[str] = Query(None),
 ):
     try:
-        resolved_user_id, resolved_role = resolve_user_and_role(token)
+        claims = verify_token(token or "")
+        account = await run_in_threadpool(get_current_user, token)
+        resolved_user_id, resolved_role = account["id"], account["role"]
     except Exception:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
@@ -37,8 +42,25 @@ async def websocket_notifications(
             "timestamp": datetime.utcnow().isoformat()
         }))
 
+        next_check = time.monotonic() + 30
         while True:
-            data = await websocket.receive_text()
+            remaining = claims["exp"] - time.time()
+            if remaining <= 0:
+                await websocket.close(code=1008)
+                break
+            if time.monotonic() >= next_check:
+                try:
+                    account = await run_in_threadpool(get_current_user, token)
+                    if account["role"] != resolved_role:
+                        raise ValueError("Role changed")
+                except Exception:
+                    await websocket.close(code=1008)
+                    break
+                next_check = time.monotonic() + 30
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), min(remaining, next_check - time.monotonic()))
+            except asyncio.TimeoutError:
+                continue
             # Support ping keepalives
             if data == "ping":
                 await websocket.send_text(json.dumps({"event": "pong", "timestamp": datetime.utcnow().isoformat()}))
@@ -50,7 +72,8 @@ async def websocket_notifications(
             except Exception:
                 pass
     except WebSocketDisconnect:
-        connection_manager.disconnect(websocket, resolved_user_id, resolved_role)
+        pass
     except Exception as e:
         logger.warning(f"WebSocket session error for {resolved_user_id}: {e}")
+    finally:
         connection_manager.disconnect(websocket, resolved_user_id, resolved_role)

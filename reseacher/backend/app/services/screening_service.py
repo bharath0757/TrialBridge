@@ -1,14 +1,16 @@
-from bson import ObjectId
+from fastapi import HTTPException
+from app.core.permissions import find_record
+from app.repositories.studies import get_by_id
 from datetime import datetime
 import random
 from app.services.ai_safeguards_service import analyze_eligibility_evidence
 
 def run_screening(db, participant_id: str, study_id: str):
-    participant = db.participants.find_one({"_id": ObjectId(participant_id)})
-    study = db.studies.find_one({"_id": ObjectId(study_id)})
+    participant = find_record(db.participants, participant_id)
+    study = get_by_id(db, study_id)
     
     if not participant or not study:
-        raise ValueError("Participant or Study not found")
+        raise HTTPException(404, "Participant or study not found")
         
     criteria = study.get("criteria", [])
     attributes = participant.get("clinical_attributes", {})

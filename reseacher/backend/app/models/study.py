@@ -66,6 +66,6 @@ class StudyResponse(StudyBase):
     anatomyDescription: Optional[str] = None
     criteria: List[dict] = []
     criteria_version: Optional[int] = 1
-    created_at: datetime
+    created_at: Optional[datetime] = None
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 

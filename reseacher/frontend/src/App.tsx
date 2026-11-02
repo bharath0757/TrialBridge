@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { lazy, Suspense, useState, useEffect } from 'react';
 import { TrialBridgeProvider, useTrialBridge } from '@/store/TrialBridgeContext';
 import { AuthProvider, useAuth } from '@/store/AuthContext';
 import { ThemeProvider, useTheme } from '@/store/ThemeContext';
@@ -19,7 +19,7 @@ import { TasksPage } from '@/pages/TasksPage';
 import { DocumentsPage } from '@/pages/DocumentsPage';
 import { MessagesPage } from '@/pages/MessagesPage';
 import { ReportsPage } from '@/pages/ReportsPage';
-import { SimulationLabPage } from '@/pages/SimulationLabPage';
+
 import { EligibilityReviewsPage } from '@/pages/EligibilityReviewsPage';
 import { AuditLogsPage } from '@/pages/AuditLogsPage';
 import { OrganizationsPage } from '@/pages/OrganizationsPage';
@@ -31,6 +31,9 @@ import { Toaster } from '@/components/ui/sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const SimulationLabPage = lazy(() => import('@/pages/SimulationLabPage').then(module => ({ default: module.SimulationLabPage })));
+
 
 const queryClient = new QueryClient();
 
@@ -109,7 +112,7 @@ function AppContent() {
       case 'study-visits': return <VisitsPage />;
       case 'simulation-lab': 
         return (role === 'PRINCIPAL_INVESTIGATOR' || role === 'RESEARCH_COORDINATOR') 
-          ? <SimulationLabPage /> 
+          ? <Suspense fallback={<p role="status">Loading simulation lab…</p>}><SimulationLabPage /></Suspense> 
           : <PlaceholderPage title="Access Restricted" description="3D Simulation Lab & Molecular Workbench is restricted strictly to Principal Investigators and Researchers." />;
       case 'follow-ups': return <VisitsPage />;
       case 'my-appointments': return <VisitsPage />;

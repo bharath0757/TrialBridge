@@ -14,7 +14,7 @@ def ObjectId(val=None):
 
 from app.db.mongodb import get_db
 from app.core.security import get_current_user
-from app.core.permissions import require_role, require_study_access, require_organization_access
+from app.core.permissions import require_role, require_study_access, require_organization_access, require_participant_self_access, study_filter
 from app.core.connections import connection_manager
 from app.models.study import StudyResponse, StudyCreate, StudyCriterionCreate
 from app.models.participant import ParticipantResponse
@@ -96,6 +96,7 @@ def _get_study_counts(db, study_id: str, s: dict) -> Tuple[int, int, int, int]:
     return enrolled_count, screened_count, eligible_count, pending_count
 
 def _enrich_study(db, s: dict) -> dict:
+    s["_id"] = str(s["_id"])
     s["id"] = str(s.get("id") or s.get("_id") or s.get("study_code"))
     
     title = s.get("title") or s.get("name") or "Clinical Study"
@@ -160,27 +161,15 @@ def _enrich_study(db, s: dict) -> dict:
 
 @router.get("/", response_model=List[StudyResponse])
 def read_studies(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    global _STUDIES_LIST_CACHE
-    now = time.time()
-    
-    # All roles can view active studies to facilitate collaboration
-    if current_user["role"] == "PLATFORM_ADMIN":
-        studies = study_repo.list_all(db)
-    elif current_user["role"] == "ORGANIZATION":
-        studies = study_repo.list_by_org(db, current_user.get("organization_id"))
-    elif current_user["role"] == "PRINCIPAL_INVESTIGATOR":
-        studies = study_repo.list_all(db)
-    elif current_user["role"] == "RESEARCH_COORDINATOR":
-        studies = study_repo.list_all(db)
-    else:
-        studies = study_repo.list_all(db)
-        
+    studies = db.studies.find(study_filter(current_user, db))
     enriched = [_enrich_study(db, s) for s in studies]
     return enriched
 
 @router.post("/", response_model=StudyResponse)
 def create_study(study_in: StudyCreate, db = Depends(get_db), current_user: dict = Depends(require_role("PRINCIPAL_INVESTIGATOR", "PLATFORM_ADMIN"))):
     study_data = study_in.model_dump(exclude_unset=True)
+    if current_user["role"] != "PLATFORM_ADMIN":
+        study_data["organization_id"] = current_user.get("organization_id")
     study_data["principal_investigator_id"] = current_user["id"]
     study_data["principalInvestigator"] = current_user.get("name", "Dr. J Patel")
     
@@ -221,8 +210,10 @@ def create_study(study_in: StudyCreate, db = Depends(get_db), current_user: dict
         "message": f"New Clinical Study created: {created.get('title') or created.get('name')}",
         "study": enriched
     }
-    connection_manager.dispatch_role_message_sync("RESEARCH_COORDINATOR", event_payload)
-    connection_manager.dispatch_role_message_sync("PRINCIPAL_INVESTIGATOR", event_payload)
+    connection_manager.dispatch_personal_message_sync(current_user["id"], event_payload)
+    if created.get("organization_id"):
+        for coordinator in db.users.find({"organization_id": created["organization_id"], "role": "RESEARCH_COORDINATOR"}, {"_id": 1}):
+            connection_manager.dispatch_personal_message_sync(str(coordinator["_id"]), event_payload)
     connection_manager.dispatch_role_message_sync("PLATFORM_ADMIN", event_payload)
     
     # 2. Persistent Notification for Coordinators
@@ -257,6 +248,9 @@ def read_study(id: str, db = Depends(get_db), current_user: dict = Depends(get_c
 @router.put("/{id}")
 def update_study(id: str, update_data: dict, db = Depends(get_db), current_user: dict = Depends(require_role("PLATFORM_ADMIN", "ORGANIZATION", "PRINCIPAL_INVESTIGATOR"))):
     require_study_access(current_user, id, db)
+    protected = {'id', '_id', 'study_code', 'organization_id', 'principal_investigator_id', 'created_at'}
+    if any(key in protected or '.' in key or key.startswith('$') for key in update_data):
+        raise HTTPException(400, 'Cannot change identifiers or ownership through study edits')
     # If criteria changed, bump criteria_version
     if "criteria" in update_data or "eligibilityCriteria" in update_data:
         study = study_repo.get_by_id(db, id)
@@ -313,7 +307,9 @@ async def upload_candidates(
     custom_mapping = json.loads(column_mapping) if column_mapping else None
 
     if file:
-        content = await file.read()
+        content = await file.read(5 * 1024 * 1024 + 1)
+        if len(content) > 5 * 1024 * 1024:
+            raise HTTPException(413, "Candidate files must be at most 5 MiB")
         batch_doc = process_candidate_file(
             db=db,
             study_id=id,
@@ -338,7 +334,7 @@ async def upload_candidates(
     # Fetch newly inserted candidates for this batch
     candidates = list(db.candidates.find({"batch_id": batch_doc["id"]}).limit(10))
     for c in candidates:
-        c["id"] = str(c.get("_id") or c.get("id"))
+        c["id"] = str(c.pop("_id", None) or c.get("id"))
 
     # Log action
     log_action(db, current_user["id"], current_user.get("role", "RESEARCH_COORDINATOR"), "UPLOAD_CANDIDATES", "study", id, None, None, f"Uploaded batch {batch_doc['id']} ({batch_doc['valid_records']} valid)")
@@ -551,7 +547,7 @@ def submit_candidates_to_pi(
     )
 
     # Emit WebSocket event for PI
-    connection_manager.dispatch_role_message_sync("PRINCIPAL_INVESTIGATOR", {
+    connection_manager.dispatch_personal_message_sync(str(pi_id), {
         "event": "ELIGIBILITY_REVIEW_REQUESTED",
         "study_id": id,
         "study_title": study.get("title") or study.get("name"),
@@ -581,6 +577,7 @@ def read_study_participants(id: str, db = Depends(get_db), current_user: dict = 
 @router.post("/{id}/participants")
 def add_participant_to_study(id: str, participant_id: str, db = Depends(get_db), current_user: dict = Depends(require_role("RESEARCH_COORDINATOR", "PRINCIPAL_INVESTIGATOR", "ORGANIZATION", "PLATFORM_ADMIN"))):
     require_study_access(current_user, id, db)
+    require_participant_self_access(current_user, participant_id, db)
     if sp_repo.get(db, participant_id, id):
         raise HTTPException(status_code=400, detail="Participant already in study")
     sp_data = {"participant_id": participant_id, "study_id": id, "status": "IDENTIFIED"}

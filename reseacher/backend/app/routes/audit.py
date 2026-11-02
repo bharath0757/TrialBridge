@@ -10,7 +10,7 @@ router = APIRouter()
 
 @router.get("/", response_model=List[AuditLogResponse])
 def get_logs(db = Depends(get_db), current_user: dict = Depends(require_role("PLATFORM_ADMIN", "PRINCIPAL_INVESTIGATOR"))):
-    raw_logs = audit_repo.list_all(db)
+    raw_logs = audit_repo.list_all(db, {} if current_user["role"] == "PLATFORM_ADMIN" else {"user_id": current_user["id"]})
     from bson import ObjectId
     enriched = []
     for log in raw_logs:

@@ -77,7 +77,8 @@ def get_consent(id: str, db = Depends(get_db), current_user: dict = Depends(get_
 def req_consent(c_in: ConsentCreate, db = Depends(get_db), current_user: dict = Depends(require_role("RESEARCH_COORDINATOR", "PRINCIPAL_INVESTIGATOR", "PLATFORM_ADMIN"))):
     require_study_access(current_user, c_in.study_id, db)
     require_participant_self_access(current_user, c_in.participant_id, db)
-    return consent_repo.create(db, c_in.model_dump())
+    from datetime import datetime
+    return consent_repo.create(db, {**c_in.model_dump(), "status": "PENDING", "created_at": datetime.utcnow()})
 
 @router.post("/{id}/submit")
 def do_submit_consent(id: str, db = Depends(get_db), current_user: dict = Depends(require_role("PARTICIPANT"))):

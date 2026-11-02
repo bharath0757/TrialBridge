@@ -12,9 +12,10 @@ def list_by_recipient(db, recipient_id: str) -> List[dict]:
         n["_id"] = str(n["_id"])
     return notifs
 
-def mark_read(db, notif_id: str) -> bool:
-    result = db.notifications.update_one({"_id": ObjectId(notif_id)}, {"$set": {"read": True}})
-    return result.modified_count > 0
+def mark_read(db, notif_id: str, recipient_id: str) -> bool:
+    keys = [notif_id, ObjectId(notif_id)] if ObjectId.is_valid(notif_id) else [notif_id]
+    result = db.notifications.update_one({"_id": {"$in": keys}, "recipient_id": recipient_id}, {"$set": {"read": True}})
+    return result.matched_count > 0
 
 def mark_all_read(db, recipient_id: str) -> bool:
     result = db.notifications.update_many({"recipient_id": recipient_id, "read": False}, {"$set": {"read": True}})

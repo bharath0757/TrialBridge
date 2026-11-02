@@ -1,28 +1,44 @@
 from fastapi import APIRouter, Depends
 from app.db.mongodb import get_db
-from app.core.security import get_current_user
+from app.core.permissions import require_role, study_filter, accessible_study_ids
+
+report_user = require_role("PLATFORM_ADMIN", "ORGANIZATION", "RESEARCH_COORDINATOR", "PRINCIPAL_INVESTIGATOR")
+
+
+def record_filter(user, db):
+    return {} if user["role"] == "PLATFORM_ADMIN" else {"study_id": {"$in": accessible_study_ids(user, db)}}
+
+
+def participant_filter(user):
+    if user["role"] == "PLATFORM_ADMIN":
+        return {}
+    org = user.get("organization_id")
+    return {"organization_id": org} if org else {"_id": {"$in": []}}
+
 
 router = APIRouter()
 
 @router.get("/dashboard/{role}")
-def get_dashboard(role: str, db = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    active_studies = db.studies.count_documents({"status": {"$in": ["ACTIVE", "active", "recruiting", "screening"]}})
-    total_participants = db.participants.count_documents({})
-    pending_reviews = db.eligibility_reviews.count_documents({"status": {"$in": ["PENDING", "PENDING_PI_REVIEW", "human_review"]}})
-    scheduled_visits = db.visits.count_documents({"status": {"$in": ["scheduled", "SCHEDULED"]}})
+def get_dashboard(role: str, db = Depends(get_db), current_user: dict = Depends(report_user)):
+    scope = record_filter(current_user, db)
+    active_studies = db.studies.count_documents({**study_filter(current_user, db), "status": {"$in": ["ACTIVE", "active", "recruiting", "screening"]}})
+    total_participants = db.participants.count_documents(participant_filter(current_user))
+    pending_reviews = db.eligibility_reviews.count_documents({**scope, "status": {"$in": ["PENDING", "PENDING_PI_REVIEW", "human_review"]}})
+    scheduled_visits = db.visits.count_documents({**scope, "status": {"$in": ["scheduled", "SCHEDULED"]}})
 
     return {
         "active_studies": active_studies,
         "total_participants": total_participants,
         "pending_reviews": pending_reviews,
         "scheduled_visits": scheduled_visits,
-        "role": role
+        "role": current_user["role"]
     }
 
 @router.get("/enrollment")
-def get_enrollment_report(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    enrolled = db.enrollments.count_documents({"status": {"$in": ["APPROVED", "approved", "enrolled", "ENROLLED"]}})
-    total_participants = db.participants.count_documents({})
+def get_enrollment_report(db = Depends(get_db), current_user: dict = Depends(report_user)):
+    scope = record_filter(current_user, db)
+    enrolled = db.enrollments.count_documents({**scope, "status": {"$in": ["APPROVED", "approved", "enrolled", "ENROLLED"]}})
+    total_participants = db.participants.count_documents(participant_filter(current_user))
     rate = round((enrolled / max(1, total_participants)) * 100, 1)
     return {
         "enrolled": enrolled,
@@ -31,25 +47,27 @@ def get_enrollment_report(db = Depends(get_db), current_user: dict = Depends(get
     }
 
 @router.get("/screening")
-def get_screening_report(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    total_screened = db.screening_results.count_documents({})
-    approved_reviews = db.eligibility_reviews.count_documents({"status": {"$in": ["APPROVED", "approved"]}})
+def get_screening_report(db = Depends(get_db), current_user: dict = Depends(report_user)):
+    scope = record_filter(current_user, db)
+    total_screened = db.screening_results.count_documents(scope)
+    approved_reviews = db.eligibility_reviews.count_documents({**scope, "status": {"$in": ["APPROVED", "approved"]}})
     return {
         "total_screened": total_screened,
         "approved_eligible": approved_reviews
     }
 
 @router.get("/analytics")
-def get_full_analytics(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
+def get_full_analytics(db = Depends(get_db), current_user: dict = Depends(report_user)):
+    scope = record_filter(current_user, db)
     # 1. Funnel
-    total_p = db.participants.count_documents({})
-    screened_count = db.screening_results.count_documents({})
-    eligible_count = db.eligibility_reviews.count_documents({"status": {"$in": ["APPROVED", "approved"]}})
-    consented_count = db.consents.count_documents({"status": {"$in": ["SIGNED", "VERIFIED", "consented"]}})
-    enrolled_count = db.enrollments.count_documents({"status": {"$in": ["APPROVED", "enrolled"]}})
+    total_p = db.participants.count_documents(participant_filter(current_user))
+    screened_count = db.screening_results.count_documents(scope)
+    eligible_count = db.eligibility_reviews.count_documents({**scope, "status": {"$in": ["APPROVED", "approved"]}})
+    consented_count = db.consents.count_documents({**scope, "status": {"$in": ["SIGNED", "VERIFIED", "consented"]}})
+    enrolled_count = db.enrollments.count_documents({**scope, "status": {"$in": ["APPROVED", "enrolled"]}})
 
     # 2. Studies breakdown
-    studies = list(db.studies.find({}, {"title": 1, "name": 1, "study_code": 1, "target_participants": 1}))
+    studies = list(db.studies.find(study_filter(current_user, db), {"title": 1, "name": 1, "study_code": 1, "target_participants": 1}))
     study_stats = []
     for s in studies:
         s_id = str(s["_id"])
@@ -73,8 +91,8 @@ def get_full_analytics(db = Depends(get_db), current_user: dict = Depends(get_cu
     }
 
 @router.get("/clinical-trial-metrics")
-def get_clinical_trial_metrics(db = Depends(get_db), current_user: dict = Depends(get_current_user)):
-    participants = list(db.participants.find({}))
+def get_clinical_trial_metrics(db = Depends(get_db), current_user: dict = Depends(report_user)):
+    participants = list(db.participants.find(participant_filter(current_user), {"clinical_attributes": 1, "clinicalData": 1}))
     data = []
     for p in participants:
         clin = p.get("clinical_attributes") or {}

@@ -191,3 +191,56 @@ def test_participant_list_batches_related_queries(access_client):
         collection = getattr(counted_db, name)
         assert collection.find.call_count == 1
         collection.find_one.assert_not_called()
+
+def test_clinical_actions_enforce_study_and_participant_boundaries(access_client):
+    client, db, actors, ids = access_client
+    foreign_pid, foreign_sid = ids['participant_b'], ids['study_b']
+    rc, pi = actors['rc_a']['headers'], actors['pi_a']['headers']
+    review = db.eligibility_reviews.insert_one({'study_id': foreign_sid, 'participant_id': foreign_pid, 'status': 'PENDING_PI_REVIEW'}).inserted_id
+    assert client.get('/api/eligibility/pending', headers=pi).json() == []
+    assert client.get(f'/api/eligibility/by-study/{foreign_sid}', headers=pi).status_code == 403
+    for action in ['reject', 'approve', 'request-info']:
+        assert client.post(f'/api/eligibility/{review}/{action}', headers=pi, json={'reason': 'test'}).status_code == 403
+    assert db.eligibility_reviews.find_one({'_id': review})['status'] == 'PENDING_PI_REVIEW'
+    assert client.post(f'/api/participants/{foreign_pid}/approve-screening', headers=rc).status_code == 403
+    assert client.get(f'/api/screening/{foreign_pid}/{foreign_sid}', headers=actors['participant_a']['headers']).status_code == 403
+    assert client.post('/api/enrollment/request', headers=rc, json={'study_id': ids['study_a'], 'participant_id': foreign_pid}).status_code == 403
+    response = client.post('/api/enrollment/request', headers=rc, json={'study_id': ids['study_a'], 'participant_id': ids['participant_a'], 'status': 'APPROVED'})
+    assert response.status_code == 200 and response.json()['status'] == 'PENDING_APPROVAL'
+    assert [s['id'] for s in client.get('/api/studies/', headers=rc).json()] == [ids['study_a']]
+    assert client.get('/api/reports/enrollment', headers=rc).json()['total_participants'] == 1
+
+
+def test_admet_review_is_private_and_decision_is_recorded_once(access_client):
+    client, db, actors, ids = access_client
+    path = '/api/admet'
+    rc, pi = actors['rc_a']['headers'], actors['pi_a']['headers']
+    assert client.get(path + '/history').status_code == 401
+    assert client.get(path + '/history', headers=actors['participant_a']['headers']).status_code == 403
+    result = client.post(path + '/analyze', headers=rc, json={})
+    assert result.status_code == 200, result.text
+    aid = result.json()['analysis_id']
+    assert client.get(path + '/analysis/' + aid, headers=pi).status_code == 404
+    assert client.post(path + '/request-review', headers=rc, json={'study_id': ids['study_b'], 'analysis_id': aid}).status_code == 403
+    assert client.post(path + '/request-review', headers=rc, json={'study_id': ids['study_a'], 'analysis_id': aid}).status_code == 200
+    assert client.get(path + '/history?review_status=PENDING_PI_REVIEW', headers=pi).json()[0]['analysis_id'] == aid
+    decision = {'analysis_id': aid, 'decision': 'REJECTED', 'reviewer_name': 'Impersonated', 'review_notes': 'Test review'}
+    assert client.post(path + '/review', headers=rc, json=decision).status_code == 403
+    result = client.post(path + '/review', headers=pi, json=decision)
+    assert result.status_code == 200 and result.json()['reviewer_name'] == 'pi_a'
+    assert client.post(path + '/review', headers=pi, json=decision).status_code == 404
+
+
+def test_repeat_invitation_response_cannot_duplicate_visit_or_change_choice(access_client):
+    client, db, actors, ids = access_client
+    pid, sid = ids['participant_a'], ids['study_a']
+    actor = actors['participant_a']
+    nid = db.notifications.insert_one({'recipient_id': actor['id'], 'type': 'TRIAL_INVITATION',
+                                       'metadata': {'participant_id': pid, 'study_id': sid}}).inserted_id
+    url = f'/api/participants/{pid}/trial-decision'
+    assert client.patch(f'/api/notifications/{nid}/read', headers=actors['participant_b']['headers']).status_code == 404
+    assert client.post(url, headers=actors['participant_b']['headers'], json={'decision': 'ACCEPT'}).status_code == 403
+    for _ in range(2):
+        assert client.post(url, headers=actor['headers'], json={'notification_id': str(nid), 'decision': 'ACCEPT'}).status_code == 200
+    assert db.visits.count_documents({'_id': 'baseline-' + str(nid)}) == 1
+    assert client.post(url, headers=actor['headers'], json={'decision': 'REJECT'}).status_code == 409

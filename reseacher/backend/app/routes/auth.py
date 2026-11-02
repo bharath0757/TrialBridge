@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import OAuth2PasswordRequestForm
+from starlette.concurrency import run_in_threadpool
 from app.db.mongodb import db_instance, get_db
 from app.core.security import verify_password, create_access_token, hash_password, get_current_user
 from app.models.user import UserCreate, UserResponse
@@ -36,10 +36,12 @@ async def login(request: Request):
     if not isinstance(username, str) or not isinstance(password, str):
         raise HTTPException(status_code=400, detail="Email and password must be strings")
     username = username.strip().lower()
+    if len(username) > 320 or len(password) > 1024:
+        raise HTTPException(400, "Invalid credential length")
     if not username or not password:
         raise HTTPException(status_code=400, detail="Username or email is required")
 
-    get_db()
+    await run_in_threadpool(get_db)
 
     # 0. Check Rate Limiter (Dual-key: IP and Username) & apply progressive exponential backoff (after 3 failed attempts)
     await login_rate_limiter.check_and_apply_backoff(request, username)
@@ -69,25 +71,25 @@ async def login(request: Request):
     # 1. Check live MongoDB database if connected
     if db_instance.is_connected and db_instance.db is not None:
         from app.repositories import users as user_repo
-        user = user_repo.get_by_email(db_instance.db, username)
+        user = await run_in_threadpool(user_repo.get_by_email, db_instance.db, username)
         if user:
             # Check if account is locked by administrator or security policy
             if user.get("is_locked", False):
-                _record_login(username, False, u_id=str(user.get("_id", "")), reason="Account locked due to security policy")
+                await run_in_threadpool(_record_login, username, False, u_id=str(user.get("_id", "")), reason="Account locked due to security policy")
                 raise HTTPException(
                     status_code=423, 
                     detail="Account is locked due to security policy. Please contact Platform Administrator to unlock your account."
                 )
 
             # Allow bcrypt verification or fallback demo password for testing
-            pwd_valid = verify_password(password, user.get("hashed_password", ""))
+            pwd_valid = await run_in_threadpool(verify_password, password, user.get("hashed_password", ""))
             if not pwd_valid:
                 login_rate_limiter.record_failure(request, username, db=db_instance.db if db_instance.is_connected else None)
-                _record_login(username, False, u_id=str(user.get("_id", "")), reason="Incorrect password")
+                await run_in_threadpool(_record_login, username, False, u_id=str(user.get("_id", "")), reason="Incorrect password")
                 raise HTTPException(status_code=400, detail="Incorrect email or password")
             if not user.get("is_active", True):
                 login_rate_limiter.record_failure(request, username, db=db_instance.db if db_instance.is_connected else None)
-                _record_login(username, False, u_id=str(user.get("_id", "")), reason="Inactive user")
+                await run_in_threadpool(_record_login, username, False, u_id=str(user.get("_id", "")), reason="Inactive user")
                 raise HTTPException(status_code=400, detail="Inactive user")
             
             token_payload = {
@@ -99,7 +101,7 @@ async def login(request: Request):
             }
             access_token = create_access_token(data=token_payload)
             login_rate_limiter.reset_on_success(request, username)
-            _record_login(username, True, u_id=str(user["_id"]), o_id=user.get("organization_id"))
+            await run_in_threadpool(_record_login, username, True, u_id=str(user["_id"]), o_id=user.get("organization_id"))
             return {
                 "access_token": access_token,
                 "token_type": "bearer",
@@ -113,7 +115,7 @@ async def login(request: Request):
             }
 
     login_rate_limiter.record_failure(request, username, db=db_instance.db if db_instance.is_connected else None)
-    _record_login(username, False, reason="User not found")
+    await run_in_threadpool(_record_login, username, False, reason="User not found")
     raise HTTPException(status_code=400, detail="Incorrect email or password")
 
 @router.post("/register", response_model=UserResponse)

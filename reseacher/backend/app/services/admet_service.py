@@ -252,7 +252,7 @@ class AdmetAnalysisEngine:
     def calculate_analysis(cls, req: AdmetAnalyzeRequest) -> AdmetAnalyzeResponse:
         compound = cls.get_compound_info(req.compound_id, req.smiles)
         now_str = datetime.utcnow().isoformat() + "Z"
-        analysis_id = f"ADM-{uuid.uuid4().hex[:8].upper()}"
+        analysis_id = f"ADM-{uuid.uuid4().hex.upper()}"
 
         if not compound:
             return AdmetAnalyzeResponse(
