@@ -38,16 +38,22 @@ def submit_to_pi(db, participant_id: str, study_id: str, coordinator_id: str, co
     log_action(db, coordinator_id, "RESEARCH_COORDINATOR", "SUBMIT_ELIGIBILITY", "eligibility_review", str(result.inserted_id))
     return str(result.inserted_id)
 
-def approve_eligibility(db, review_id: str, pi_id: str, reason: str):
-    review = db.eligibility_reviews.find_one({"_id": ObjectId(review_id)})
+def decide_pending_review(db, review_id, decision, reason):
+    from app.core.permissions import find_record
+    review = find_record(db.eligibility_reviews, review_id)
     if not review:
-        raise HTTPException(status_code=404, detail="Review not found")
-
-        
-    db.eligibility_reviews.update_one(
-        {"_id": ObjectId(review_id)},
-        {"$set": {"status": "APPROVED", "pi_notes": reason, "updated_at": datetime.utcnow()}}
+        raise HTTPException(404, "Review not found")
+    updated = db.eligibility_reviews.update_one(
+        {"_id": review["_id"], "status": "PENDING_PI_REVIEW"},
+        {"$set": {"status": decision, "pi_notes": reason, "updated_at": datetime.utcnow()}},
     )
+    if not updated.matched_count:
+        raise HTTPException(409, "Only a pending review can receive a decision")
+    return review
+
+
+def approve_eligibility(db, review_id: str, pi_id: str, reason: str):
+    review = decide_pending_review(db, review_id, "APPROVED", reason)
     
     # 1. Update study_participants if exists
     try:
@@ -156,14 +162,7 @@ def approve_eligibility(db, review_id: str, pi_id: str, reason: str):
     return True
 
 def reject_eligibility(db, review_id: str, pi_id: str, reason: str):
-    review = db.eligibility_reviews.find_one({"_id": ObjectId(review_id)})
-    if not review:
-        raise HTTPException(status_code=404, detail="Review not found")
-        
-    db.eligibility_reviews.update_one(
-        {"_id": ObjectId(review_id)},
-        {"$set": {"status": "REJECTED", "pi_notes": reason, "updated_at": datetime.utcnow()}}
-    )
+    review = decide_pending_review(db, review_id, "REJECTED", reason)
     
     try:
         db.study_participants.update_one(
@@ -236,14 +235,7 @@ def reject_eligibility(db, review_id: str, pi_id: str, reason: str):
     return True
 
 def request_more_info(db, review_id: str, pi_id: str, reason: str):
-    review = db.eligibility_reviews.find_one({"_id": ObjectId(review_id)})
-    if not review:
-        raise HTTPException(status_code=404, detail="Review not found")
-        
-    db.eligibility_reviews.update_one(
-        {"_id": ObjectId(review_id)},
-        {"$set": {"status": "INFO_REQUESTED", "pi_notes": reason, "updated_at": datetime.utcnow()}}
-    )
+    review = decide_pending_review(db, review_id, "INFO_REQUESTED", reason)
 
     # Update candidate status
     cand_id = review.get("candidate_id")

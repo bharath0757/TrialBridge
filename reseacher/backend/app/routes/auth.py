@@ -6,7 +6,15 @@ from app.models.user import UserCreate, UserResponse
 from datetime import datetime
 from app.core.rate_limiter import login_rate_limiter
 
+from app.core.config import settings
+
 router = APIRouter()
+
+
+@router.get("/options")
+def login_options():
+    return {"demo_login_enabled": settings.demo_login_enabled}
+
 
 @router.post("/login")
 async def login(request: Request):
@@ -42,6 +50,9 @@ async def login(request: Request):
         raise HTTPException(status_code=400, detail="Username or email is required")
 
     await run_in_threadpool(get_db)
+    if password == "demo123" and not settings.demo_login_enabled:
+        raise HTTPException(400, "Incorrect email or password")
+
 
     # 0. Check Rate Limiter (Dual-key: IP and Username) & apply progressive exponential backoff (after 3 failed attempts)
     await login_rate_limiter.check_and_apply_backoff(request, username)
