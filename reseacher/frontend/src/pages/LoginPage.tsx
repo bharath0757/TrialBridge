@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '@/store/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,15 +15,6 @@ import { toast } from 'sonner';
 
 export function LoginPage() {
   const { login, sessionError } = useAuth();
-
-  const [demoEnabled, setDemoEnabled] = useState(false);
-  useEffect(() => {
-    const controller = new AbortController();
-    api.get('/auth/options', { signal: controller.signal })
-      .then(({ data }) => setDemoEnabled(data?.demo_login_enabled === true))
-      .catch(() => {});
-    return () => controller.abort();
-  }, []);
 
   // Auth Mode: 'signin' | 'signup'
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
@@ -254,10 +245,11 @@ export function LoginPage() {
               </Button>
             </form>
 
-            {demoEnabled && <div className="mt-6 pt-5 border-t border-slate-100">
+            {/* Demo Sign-In */}
+            <div className="mt-6 pt-5 border-t border-slate-100">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                  Demo Sign-In · Synthetic data only
+                  Demo Sign-In
                 </span>
                 <span className="text-[10px] text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full font-medium">
                   Password: demo123
@@ -355,7 +347,7 @@ export function LoginPage() {
                   <span className="text-[11px] font-medium text-teal-600 group-hover:translate-x-0.5 transition-transform">Sign in &rarr;</span>
                 </button>
               </div>
-            </div>}
+            </div>
 
           </>
         ) : (

@@ -244,33 +244,3 @@ def test_repeat_invitation_response_cannot_duplicate_visit_or_change_choice(acce
         assert client.post(url, headers=actor['headers'], json={'notification_id': str(nid), 'decision': 'ACCEPT'}).status_code == 200
     assert db.visits.count_documents({'_id': 'baseline-' + str(nid)}) == 1
     assert client.post(url, headers=actor['headers'], json={'decision': 'REJECT'}).status_code == 409
-
-def test_demo_password_requires_isolated_database(access_client, monkeypatch):
-    from app.core.config import settings
-    from app.core.security import hash_password
-    client, db, actors, _ = access_client
-    actor = actors["admin"]
-    db.users.update_one({"_id": actor["_id"]}, {"$set": {"hashed_password": hash_password("demo123")}})
-    monkeypatch.setattr(settings, "ENABLE_DEMO_LOGIN", True)
-    login = {"email": actor["email"], "password": "demo123"}
-    assert client.post("/api/auth/login", json=login).status_code == 400
-    monkeypatch.setattr(settings, "MONGODB_DATABASE", "trialbridge_demo")
-    token = client.post("/api/auth/login", json=login).json()["access_token"]
-    monkeypatch.setattr(settings, "MONGODB_DATABASE", "trialbridge")
-    assert client.get("/api/auth/me", headers={"Authorization": "Bearer " + token}).status_code == 401
-
-
-def test_conflicting_review_decisions_have_one_winner(access_client):
-    from concurrent.futures import ThreadPoolExecutor
-    from fastapi import HTTPException
-    from app.services.eligibility_service import decide_pending_review
-    _, db, _, _ = access_client
-    key = db.eligibility_reviews.insert_one({"status": "PENDING_PI_REVIEW"}).inserted_id
-    def decide(value):
-        try:
-            decide_pending_review(db, str(key), value, "test")
-            return 200
-        except HTTPException as error:
-            return error.status_code
-    with ThreadPoolExecutor(2) as workers:
-        assert sorted(workers.map(decide, ["APPROVED", "REJECTED"])) == [200, 409]

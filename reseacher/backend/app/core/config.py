@@ -3,12 +3,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     MONGODB_URI: str = ''
     MONGODB_DATABASE: str = 'trialbridge'
-    ENABLE_DEMO_LOGIN: bool = False
-
-    @property
-    def demo_login_enabled(self) -> bool:
-        return self.ENABLE_DEMO_LOGIN and self.MONGODB_DATABASE == "trialbridge_demo"
-
     JWT_SECRET: str = ''
     GEMINI_API_KEY: str = ''
     JWT_ALGORITHM: str = 'HS256'

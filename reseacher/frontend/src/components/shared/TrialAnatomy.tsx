@@ -1,11 +1,4 @@
-import { lazy, Suspense } from 'react';
-import type { KidneyViewer3DProps } from './KidneyViewer3D';
-
-const Viewer = lazy(() => import('./KidneyViewer3D').then(module => ({ default: module.KidneyViewer3D })));
-
-export function KidneyViewer3D(props: KidneyViewer3DProps) {
-  return <Suspense fallback={<p role="status">Loading anatomy viewer…</p>}><Viewer {...props} /></Suspense>;
-}
+import { KidneyViewer3D } from './KidneyViewer3D';
 
 interface TrialAnatomyProps {
   organ?: string;
@@ -33,3 +26,4 @@ export function TrialAnatomy({
   );
 }
 
+export { KidneyViewer3D };

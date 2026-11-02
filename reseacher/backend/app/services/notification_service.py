@@ -68,8 +68,15 @@ def notify_role_for_study(
 ):
     if db is None:
         return
-    from app.repositories.studies import get_by_id
-    study = get_by_id(db, study_id)
+    study = None
+    try:
+        try:
+            from bson import ObjectId
+            study = db.studies.find_one({"_id": {"$in": [study_id, ObjectId(study_id)]}})
+        except Exception:
+            study = db.studies.find_one({"_id": study_id})
+    except Exception:
+        study = None
     if not study:
         return
     
@@ -82,6 +89,11 @@ def notify_role_for_study(
         coord_id = study.get("coordinator_id")
         if coord_id:
             create_notification(db, str(coord_id), "STUDY_UPDATE", title, message, entity_type, entity_id, metadata=metadata)
-        elif study.get("organization_id"):
-            for coordinator in db.users.find({"organization_id": study["organization_id"], "role": role}, {"_id": 1}):
-                create_notification(db, str(coordinator["_id"]), "STUDY_UPDATE", title, message, entity_type, entity_id, metadata=metadata)
+        else:
+            # Broadcast to all coordinators
+            connection_manager.dispatch_role_message_sync("RESEARCH_COORDINATOR", {
+                "event": "ROLE_BROADCAST",
+                "title": title,
+                "message": message,
+                "study_id": str(study_id)
+            })

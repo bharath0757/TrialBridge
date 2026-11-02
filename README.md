@@ -42,7 +42,3 @@ Local verification passed 11 frontend regression tests and all 50 backend tests,
 Existing repository-wide lint debt remains (baseline: 206 errors and 13 warnings). Several dashboards, charts, simulations, and help/profile views still contain illustrative data or placeholder behavior. This is a prototype, not a claim that all features are validated for clinical production use.
 
 This clean source snapshot excludes secrets, generated builds, caches, local IDE settings, and the original repository history that contained credentials.
-
-### Public demonstration accounts
-
-The API accepts the displayed shared password only when both `ENABLE_DEMO_LOGIN=true` and `MONGODB_DATABASE=trialbridge_demo`. Use a separate deployment with synthetic records, its own JWT secret, and a MongoDB credential restricted to that database. The login screen reads this setting from the API. Existing sessions must sign in again after upgrading because tokens are now bound to their database.

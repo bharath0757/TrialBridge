@@ -24,7 +24,7 @@ def create_access_token(data: dict) -> str:
         raise HTTPException(status_code=503, detail='Authentication is not configured.')
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(hours=settings.JWT_EXPIRATION_HOURS)
-    to_encode.update({"exp": expire, "iss": "trialbridge:" + settings.MONGODB_DATABASE})
+    to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
     return encoded_jwt
 
@@ -32,8 +32,7 @@ def verify_token(token: str) -> dict:
     if len(settings.JWT_SECRET) < 32:
         raise HTTPException(status_code=503, detail='Authentication is not configured.')
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM],
-                             issuer="trialbridge:" + settings.MONGODB_DATABASE)
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
         if not payload.get('sub') or not payload.get('exp') or payload.get('role') not in {'PLATFORM_ADMIN', 'ORGANIZATION', 'PRINCIPAL_INVESTIGATOR', 'RESEARCH_COORDINATOR', 'PARTICIPANT'}:
             raise JWTError('Invalid claims')
         return payload
